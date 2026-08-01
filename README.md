@@ -250,6 +250,12 @@ FilaScan adds reader-only operation, a scan screen, the HTTP reader API, and the
 Spoolman bridge. Printer MQTT connections and upstream OTA checks are disabled.
 Bambu factory-tag scans do not create records in the embedded inventory.
 
+## AI-assisted development
+
+OpenAI Codex was used to implement firmware changes, build and flash scripts,
+the Spoolman bridge, and project documentation. The firmware was built, flashed,
+and tested with the target hardware and a Bambu Lab filament spool.
+
 Additional references:
 
 - [SpoolEase documentation](https://docs.spoolease.io/docs/welcome)
