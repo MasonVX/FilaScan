@@ -1,0 +1,129 @@
+name: Build FilaScan firmware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - core/**
+      - shared/**
+      - .github/workflows/firmware.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - core/**
+      - shared/**
+      - .github/workflows/firmware.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firmware-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  ESP_TOOLCHAIN_NAME: esp190
+  ESP_TOOLCHAIN_VERSION: 1.90.0.0
+  ESPUP_VERSION: 0.17.1
+  ESPFLASH_VERSION: 4.5.0
+
+jobs:
+  build:
+    name: ESP32-S3 release image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore ESP toolchain cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup/toolchains/esp190
+            ~/export-esp190.sh
+            ~/.cargo/bin/espup
+            ~/.cargo/bin/espflash
+          key: filascan-${{ runner.os }}-esp190-1.90.0.0-espup-0.17.1-espflash-4.5.0
+
+      - name: Restore Cargo source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: filascan-${{ runner.os }}-cargo-${{ hashFiles('core/Cargo.lock', 'shared/Cargo.lock') }}
+          restore-keys: |
+            filascan-${{ runner.os }}-cargo-
+
+      - name: Add Cargo tools to PATH
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install ESP tools
+        shell: bash
+        run: |
+          if ! espup --version 2>/dev/null | grep -Fq "$ESPUP_VERSION"; then
+            cargo install espup --version "$ESPUP_VERSION" --locked
+          fi
+          if ! espflash --version 2>/dev/null | grep -Fq "$ESPFLASH_VERSION"; then
+            cargo install espflash --version "$ESPFLASH_VERSION" --locked
+          fi
+
+      - name: Install ESP Rust toolchain
+        shell: bash
+        run: |
+          export_file="$HOME/export-$ESP_TOOLCHAIN_NAME.sh"
+          toolchain_dir="$HOME/.rustup/toolchains/$ESP_TOOLCHAIN_NAME"
+
+          if [[ ! -d "$toolchain_dir" || ! -f "$export_file" ]]; then
+            espup install \
+              --name "$ESP_TOOLCHAIN_NAME" \
+              --toolchain-version "$ESP_TOOLCHAIN_VERSION" \
+              --targets esp32s3 \
+              --export-file "$export_file"
+          fi
+
+          # shellcheck source=/dev/null
+          source "$export_file"
+          test -n "${LIBCLANG_PATH:-}"
+          echo "LIBCLANG_PATH=$LIBCLANG_PATH" >> "$GITHUB_ENV"
+          xtensa_bin="$(dirname "$(command -v xtensa-esp32s3-elf-gcc)")"
+          printf '%s\n' "$xtensa_bin" >> "$GITHUB_PATH"
+          rustup run "$ESP_TOOLCHAIN_NAME" rustc --version
+
+      - name: Build release firmware
+        working-directory: core
+        run: cargo build --locked --release
+
+      - name: Create merged flash image
+        working-directory: core
+        shell: bash
+        run: |
+          mkdir -p ../dist
+          espflash save-image \
+            --chip esp32s3 \
+            --flash-size 16mb \
+            --flash-mode dio \
+            --flash-freq 80mhz \
+            --partition-table partitions.csv \
+            --merge \
+            target/xtensa-esp32s3-none-elf/release/SpoolEase \
+            ../dist/FilaScan-esp32s3.bin
+
+          sha256sum ../dist/FilaScan-esp32s3.bin > ../dist/FilaScan-esp32s3.bin.sha256
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          printf 'project=FilaScan\nfirmware_version=%s\ngit_commit=%s\ntarget=esp32s3\nflash_size=16mb\n' \
+            "$version" "$GITHUB_SHA" > ../dist/build-info.txt
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: FilaScan-esp32s3-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated firmware build output"
+paths = [
+  '''^core/target/''',
+  '''^shared/target/''',
+  '''^build/''',
+  '''^dist/''',
+]

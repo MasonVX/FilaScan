@@ -3,5 +3,9 @@ core/target/
 shared/target/
 
 # Generated firmware binaries (built by CI, not committed)
-docs/firmware/*.bin
 build/*.bin
+build/bins/
+dist/
+.wrangler/
+core/src/certs/web-server-certificate.pem
+core/src/certs/web-server-private-key.pem

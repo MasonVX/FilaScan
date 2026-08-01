@@ -11,9 +11,10 @@ for export_file in "$HOME/export-esp190.sh" "$HOME/export-esp1.sh" "$HOME/export
   fi
 done
 
-export PATH="$(brew --prefix rustup)/bin:$HOME/.cargo/bin:$PATH"
+rustup_bin="$(brew --prefix rustup)/bin"
+export PATH="$rustup_bin:$HOME/.cargo/bin:$PATH"
 cd "$repo_dir/core"
-cargo build --release
+cargo build --locked --release
 
 mkdir -p "$repo_dir/build"
 espflash save-image \
@@ -24,6 +25,6 @@ espflash save-image \
   --partition-table partitions.csv \
   --merge \
   target/xtensa-esp32s3-none-elf/release/SpoolEase \
-  "$repo_dir/build/bambu-rfid-reader.bin"
+  "$repo_dir/build/FilaScan-esp32s3.bin"
 
-echo "Built $repo_dir/build/bambu-rfid-reader.bin"
+echo "Built $repo_dir/build/FilaScan-esp32s3.bin"

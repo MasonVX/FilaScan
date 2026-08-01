@@ -90,7 +90,7 @@ are not compatible with the upstream `esp-wifi-sys 0.8.1` dependency.
 The build produces a merged 16 MB flash image at:
 
 ```text
-build/bambu-rfid-reader.bin
+build/FilaScan-esp32s3.bin
 ```
 
 The upstream executable is still named `SpoolEase` internally. This is an
@@ -231,7 +231,20 @@ client isolation is disabled.
 | `shared/` | Shared NFC, networking, and device components inherited from SpoolEase |
 | `integrations/spoolman/` | Optional FilaScan-to-Spoolman bridge |
 | `scripts/` | macOS bootstrap, build, and flash commands |
-| `docs/` | Upstream web assets and flashing support |
+
+## Continuous integration
+
+The workflow in [`.github/workflows/firmware.yml`](.github/workflows/firmware.yml)
+builds the ESP32-S3 firmware when firmware-related files are pushed to `main`,
+in pull requests targeting `main`, and during manual runs. It uploads the
+following files as a GitHub Actions artifact:
+
+- `FilaScan-esp32s3.bin`
+- `FilaScan-esp32s3.bin.sha256`
+- `build-info.txt`
+
+Artifacts are retained for 14 days. The workflow does not deploy GitHub Pages,
+does not use repository secrets, and has read-only repository permissions.
 
 ## Origin
 

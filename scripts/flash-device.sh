@@ -4,7 +4,8 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 port="${1:-/dev/cu.usbmodem31101}"
 
-export PATH="$(brew --prefix rustup)/bin:$HOME/.cargo/bin:$PATH"
+rustup_bin="$(brew --prefix rustup)/bin"
+export PATH="$rustup_bin:$HOME/.cargo/bin:$PATH"
 espflash flash \
   --chip esp32s3 \
   --flash-size 16mb \

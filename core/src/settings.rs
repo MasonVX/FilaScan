@@ -7,8 +7,10 @@ pub const WEB_SERVER_HTTPS: bool = false; // Don't forget to set also port below
 pub const WEB_SERVER_PORT: u16 = 80; // For HTTPS use 443 normally, for HTTP 80, but either can be any other port number
 pub const WEB_SERVER_CAPTIVE: bool = true;
 pub const WEB_SERVER_NUM_LISTENERS: usize = 5;
-pub const WEB_SERVER_TLS_CERTIFICATE: &str = concat!(include_str!("./certs/web-server-certificate.pem"), "\0");
-pub const WEB_SERVER_TLS_PRIVATE_KEY: &str = concat!(include_str!("./certs/web-server-private-key.pem"), "\0");
+// HTTPS is disabled above. Never ship the shared upstream development key.
+// Generate a device-specific certificate before enabling HTTPS.
+pub const WEB_SERVER_TLS_CERTIFICATE: &str = "\0";
+pub const WEB_SERVER_TLS_PRIVATE_KEY: &str = "\0";
 
 pub const WEB_APP_DOMAIN: &str = "device.spoolease.io";
 pub const WEB_APP_SECURITY_KEY_LENGTH: usize = 7;

@@ -3,7 +3,7 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      # Use the reader's LAN address, for example http://spoolease.local.
+      # Use the reader's LAN address, for example http://filascan.local.
       READER_URL: ${READER_URL}
       SPOOLMAN_URL: ${SPOOLMAN_URL:-http://host.docker.internal:7912}
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-1}
