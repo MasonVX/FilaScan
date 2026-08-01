@@ -1,37 +1,24 @@
 # FilaScan
 
-**FilaScan is a dedicated, source-available RFID reader for identifying filament
-spools and forwarding their metadata to external filament-management systems.**
+FilaScan is firmware for a standalone filament RFID reader using a WT32-SC01
+Plus and a PN532. It reads Bambu Lab factory tags and displays the material,
+variant, color, and nominal spool weight.
 
-Hold a supported Bambu Lab filament spool against the reader and FilaScan
-immediately displays its material, variant, color, and nominal weight. The most
-recent scan is also exposed through a small HTTP API for integrations such as
+The latest scan is available through an HTTP API. A bridge can send the data to
 [Spoolman](https://github.com/Donkie/Spoolman).
 
-FilaScan reuses the proven ESP32-S3 display and PN532 reader hardware from
-SpoolEase, but deliberately removes the printer-centric workflow from the user
-experience. It does not connect to a Bambu printer over MQTT and does not use
-the embedded SpoolEase inventory as the system of record.
+FilaScan is based on the original [SpoolEase](https://github.com/yanshay/SpoolEase)
+implementation. It uses the SpoolEase hardware support, display stack, PN532
+driver, RFID decoding, and Wi-Fi provisioning. FilaScan changes the application
+to reader-only operation: it does not connect to a printer over MQTT and does
+not use the embedded inventory for Bambu factory-tag scans.
 
 > [!NOTE]
 > FilaScan is an independent community project. It is not affiliated with,
 > endorsed by, or maintained by Bambu Lab or the SpoolEase maintainers.
 
-## Project intent
-
-FilaScan is designed around one focused interaction:
-
-1. Present a filament spool to the RFID reader.
-2. See the filament identity on the device immediately.
-3. Make the scan available to another system over the local network.
-
-The device should remain useful without a printer connection, cloud service,
-or built-in inventory. External applications decide what to do with a scan.
-Spoolman is the first supported integration, but the reader API is intentionally
-small and application-independent.
-
-This fork currently targets **Bambu Lab factory RFID tags**. Reading is passive:
-FilaScan does not modify or overwrite the factory tag.
+FilaScan currently supports **Bambu Lab factory RFID tags**. It only reads tags
+and does not modify their contents.
 
 ## Current features
 
@@ -246,10 +233,9 @@ client isolation is disabled.
 | `scripts/` | macOS bootstrap, build, and flash commands |
 | `docs/` | Upstream web assets and flashing support |
 
-## Upstream projects and attribution
+## Origin
 
-FilaScan exists because of the substantial work done by the SpoolEase authors
-and contributors. Its history is derived from two upstream repositories:
+FilaScan is derived from these repositories:
 
 1. **[yanshay/SpoolEase](https://github.com/yanshay/SpoolEase)** — the original
    SpoolEase project. It provides the console hardware design, ESP32 firmware
@@ -260,11 +246,9 @@ and contributors. Its history is derived from two upstream repositories:
    multilingual UI and web pages, translation tooling, CI/CD improvements, and
    inventory-related fixes on top of the original project.
 
-FilaScan retains the hardware support and low-level reader implementation while
-changing the product direction to a focused RFID appliance and integration
-source. It intentionally disables the printer MQTT workflow, bypasses the
-embedded inventory during Bambu factory-tag scans, adds a purpose-built reader
-screen, exposes a minimal scan API, and provides the Spoolman bridge.
+FilaScan adds reader-only operation, a scan screen, the HTTP reader API, and the
+Spoolman bridge. Printer MQTT connections and upstream OTA checks are disabled.
+Bambu factory-tag scans do not create records in the embedded inventory.
 
 Additional references:
 
@@ -273,23 +257,11 @@ Additional references:
 - [Bambu Research Group RFID Tag Guide](https://github.com/Bambu-Research-Group/RFID-Tag-Guide)
 - [NXP PN532 documentation](https://www.nxp.com/products/rfid-nfc/nfc-hf/nfc-readers/standard-performance-mifare-and-ntag-frontend:PN5321A3HN)
 
-Please give credit to the upstream projects when publishing builds or derived
-work.
+## Scope
 
-## Scope and future direction
-
-FilaScan is intentionally smaller in scope than SpoolEase. Planned work should
-support the reader-and-integration use case rather than rebuild a second local
-inventory system. Suitable future improvements include:
-
-- support for additional manufacturer and open spool-tag formats
-- a stable, versioned reader API
-- push-based integration events in addition to polling
-- configurable integration targets
-- simplified first-time setup under the FilaScan name
-
-Printer control, AMS management, print monitoring, and comprehensive on-device
-inventory management are explicitly outside the primary project scope.
+FilaScan covers RFID tag reading, on-device identification, and export to
+external systems. Printer control, AMS management, print monitoring, and a
+separate on-device inventory are outside its scope.
 
 ## License
 
