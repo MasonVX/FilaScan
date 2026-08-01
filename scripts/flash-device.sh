@@ -13,4 +13,4 @@ espflash flash \
   --flash-freq 80mhz \
   --partition-table "$repo_dir/core/partitions.csv" \
   --port "$port" \
-  "$repo_dir/core/target/xtensa-esp32s3-none-elf/release/SpoolEase"
+  "$repo_dir/core/target/xtensa-esp32s3-none-elf/release/FilaScan"

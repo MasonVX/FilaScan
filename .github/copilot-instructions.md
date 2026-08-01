@@ -1,23 +1,27 @@
 # FilaScan repository instructions
 
 FilaScan is ESP32-S3 firmware for a standalone Bambu Lab filament RFID reader.
-Its primary behavior is to read factory tags, display filament data, and expose
-the latest scan to external systems. Printer MQTT connections, AMS management,
-print monitoring, and the embedded SpoolEase inventory are not product goals.
+The device reads factory tags and immediately displays the mapped Bambu product,
+color and physical spool parameters.
+
+FilaScan does not contain a filament inventory, printer or AMS integration,
+MQTT client, spool scale, tag writer, print monitor or external integration API.
+The web interface is limited to Wi-Fi provisioning and read-only live
+diagnostics.
 
 ## Origin
 
 The repository is derived from `yanshay/SpoolEase` through
-`mybesttools/SpoolEase`. The Rust package and some internal paths still use the
-upstream `SpoolEase` name. Do not rename those identifiers without checking all
-build, linker, packaging, and persistence references.
+`mybesttools/SpoolEase`. The retained code covers the WT32-SC01 Plus hardware
+foundation, PN532 communication, Bambu key derivation and Wi-Fi provisioning.
 
 ## Build
 
 - Target: `xtensa-esp32s3-none-elf`
 - Toolchain: `esp190`, Espressif Rust `1.90.0.0`
 - Host tools: `espup 0.17.1`, `espflash 4.5.0`
-- Supported hardware: WT32-SC01 Plus with 16 MB flash and PN532 over SPI
+- Hardware: WT32-SC01 Plus with 16 MB flash and PN532 over SPI
+- Rust package and ELF name: `FilaScan`
 
 Use the repository scripts:
 
@@ -28,38 +32,34 @@ Use the repository scripts:
 ```
 
 The ELF is written to
-`core/target/xtensa-esp32s3-none-elf/release/SpoolEase`. The merged local flash
-image is `build/FilaScan-esp32s3.bin`; CI publishes the same filename.
-
-Files under `core/static/` are embedded at compile time. Cargo does not track
-all of them as dependencies. After changing static HTML, clean the application
-crate before building:
-
-```sh
-cd core
-cargo clean -p SpoolEase --target xtensa-esp32s3-none-elf --release
-cargo build --locked --release
-```
+`core/target/xtensa-esp32s3-none-elf/release/FilaScan`. The merged image is
+`build/FilaScan-esp32s3.bin`.
 
 ## Relevant code
 
 | Path | Purpose |
 |---|---|
-| `core/src/view_model.rs` | Reader scan processing and UI state |
-| `core/src/tag_standards.rs` | Bambu tag fields and spool identity |
-| `core/src/web_app.rs` | Read-only reader HTTP endpoint |
-| `core/ui/` | Slint device UI |
-| `shared/src/nfc.rs` | RFID block-read definitions |
-| `integrations/spoolman/` | Optional Spoolman synchronization bridge |
+| `core/src/bambu_spool.rs` | Raw tag parsing and official-name mapping |
+| `core/src/diagnostics.rs` | Bounded in-memory reader log |
+| `core/src/app.rs` | Reader events and Slint state updates |
+| `core/ui/` | On-device spool overview |
+| `core/static/` | Wi-Fi-only web configuration |
+| `shared/src/bambu_reader.rs` | Continuous PN532 scan loop |
+| `shared/src/nfc.rs` | Required Bambu tag blocks |
+| `shared/src/pn532_ext.rs` | MIFARE reads and Bambu key derivation |
 | `.github/workflows/firmware.yml` | Reproducible CI firmware build |
 
 ## Constraints
 
-- Keep `READER_ONLY_MODE` enabled unless the product scope changes explicitly.
-- Do not re-enable upstream OTA checks. They can replace FilaScan with upstream
-  firmware.
-- Keep `/api/reader/last-scan` read-only and free of credentials or inventory
-  data.
-- Physical Spoolman record creation must remain opt-in.
-- Preserve the upstream hardware pin assignment unless a new board target is
-  introduced explicitly.
+- Preserve the WT32-SC01 Plus and PN532 pin assignment unless a new board target
+  is introduced explicitly.
+- Keep RFID operation read-only.
+- Preserve partial Bambu payload blocks across retries; marginal RF coupling
+  must not force already-read sectors to be fetched again.
+- After a MIFARE read failure, return to `InListPassiveTarget`; do not add
+  `InRelease`/`InSelect` retries that bypass the original SpoolEase reader flow.
+- Keep material and color mapping local and retain raw values as the fallback
+  for unknown Bambu entries.
+- Do not add inventory, printer, MQTT, scale or OTA controls to the Wi-Fi and
+  diagnostics page.
+- Add an external integration API as a separate, deliberately reviewed change.

@@ -24,7 +24,7 @@ espflash save-image \
   --flash-freq 80mhz \
   --partition-table partitions.csv \
   --merge \
-  target/xtensa-esp32s3-none-elf/release/SpoolEase \
+  target/xtensa-esp32s3-none-elf/release/FilaScan \
   "$repo_dir/build/FilaScan-esp32s3.bin"
 
 echo "Built $repo_dir/build/FilaScan-esp32s3.bin"
