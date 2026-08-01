@@ -651,6 +651,16 @@ impl AppWithStateBuilder for NestedAppBuilder {
             }),
         );
 
+        // Unencrypted, read-only integration surface for local automation.
+        // It deliberately exposes only factory-tag data, never Wi-Fi,
+        // printer, inventory, or security-key configuration.
+        let router = router.route(
+            "/api/reader/last-scan",
+            get(move |state: State<ConsoleAppState>| {
+                ready(state.0.view_model.borrow().last_reader_scan_json())
+            }),
+        );
+
         let router = router.route(
             "/inventory",
             get(move |state: State<ConsoleAppState>| {

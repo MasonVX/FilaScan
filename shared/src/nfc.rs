@@ -83,7 +83,10 @@ where
     let end_time = Instant::now() + timeout;
     let bambulab_keys = crate::pn532_ext::bambulab_keys(uid);
     let mut currently_authenticated_sector = None;
-    let blocks_to_read = [1, 2, 4, 5, 6, 13, 16];
+    // Block 9 contains the physical tray/spool UID shared by both factory
+    // tags on one Bambu spool. Reading it lets downstream inventory systems
+    // deduplicate scans from the two sides of the same spool.
+    let blocks_to_read = [1, 2, 4, 5, 6, 9, 13, 16];
     let mut res_map = HashMap::new();
     for block_number in blocks_to_read {
         let mut res_vec = alloc::vec![0u8;16];

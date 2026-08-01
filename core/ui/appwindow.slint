@@ -27,6 +27,49 @@ export { FrameworkState, FrameworkBackend }
 export { AppState, AppBackend }
 export { Translations } 
 
+component ReaderHome inherits Rectangle {
+    background: #10151d;
+
+    VerticalLayout {
+        padding: 22px;
+        spacing: 16px;
+        alignment: center;
+
+        Text {
+            horizontal-alignment: center;
+            color: #72d6ff;
+            font-size: 32px;
+            font-weight: 700;
+            text: "Bambu RFID Reader";
+        }
+
+        Rectangle {
+            height: 5px;
+            background: AppState.tag-reader-available ? #2ecc71 : #e74c3c;
+        }
+
+        Text {
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            color: white;
+            font-size: 24px;
+            text: !AppState.tag-reader-available
+                ? "RFID-Leser nicht verfügbar"
+                : AppState.control-state == ControlState.Reading
+                    ? "RFID wird gelesen …"
+                    : "Bambu-Filamentrolle an den Sensor halten";
+        }
+
+        Text {
+            horizontal-alignment: center;
+            color: #9aa8b8;
+            font-size: 17px;
+            text: "Material und Farbe erscheinen automatisch";
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     width: 480px;
     height: 320px;
@@ -64,7 +107,7 @@ export component AppWindow inherits Window {
         height: parent.height;
         handle-swipe-up: current-page < 2 && (!AppState.select-printer);
         handle-swipe-down: current-page > 0 && (!AppState.select-printer);
-        handle-swipe-left: AppState.select-printer == false;
+        handle-swipe-left: AppState.select-printer == false && AppState.available-printers.length > 1;
         handle-swipe-right: AppState.select-printer == true;
         swiped => {
             if FrameworkState.ota-state != OtaState.Started {
@@ -105,52 +148,9 @@ export component AppWindow inherits Window {
             }
 
             // Page 1 :  App Window
-            page1 := VerticalLayout {
+            page1 := ReaderHome {
                 height: parent.height;
                 width: parent.width;
-                alignment: stretch;
-                top := HorizontalLayout {
-                    spacing: AppConsts.trays-spacing;
-
-                    // Separating the external tray from the ams trays so can scroll the ams trays in case of several ams's
-                    if AppState.ams-exists.length > 0: 
-                      ams := Trays {
-                        is_ams: true;
-                        title: "AMS - " + (AppState.curr-ams-id + 1);
-                        include-paging-left: false;
-                        include-paging-right: false;
-                        tray_numbers: AppState.curr-ams-id <= 3 ? [
-                            AppState.get_tray_index(AppState.curr-ams-id, 0),
-                            AppState.get_tray_index(AppState.curr-ams-id, 1),
-                            AppState.get_tray_index(AppState.curr-ams-id, 2),
-                            AppState.get_tray_index(AppState.curr-ams-id, 3),
-                        ] : [AppState.get_tray_index(AppState.curr-ams-id, 0)];
-                        trays-state: AppState.trays-state;
-                    }
-
-                    external := Trays {
-                        is_ams: false;
-                        title: AppState.num-extruders == 1 ? Translations.tr-external : AppState.displayed-extruder == 0 ? Translations.tr-ext-right : Translations.tr-ext-left;
-                        tray_numbers: [AppState.displayed-extruder];
-                        trays-state: AppState.trays-state;
-                        title-clicked => { 
-                          if AppState.num-extruders == 2 {
-                            AppState.displayed-extruder = 1 - AppState.displayed-extruder;
-                          }
-                        }
-                    }
-                }
-
-                bottom := ControlPanel {
-                    clicked-ota => {
-                        root.current-page = 2;
-                        FrameworkState.ota-clear-message();
-                        FrameworkState.ota-state = OtaState.Checking;
-                        AppBackend.ota-check-firmwares();
-                    }
-                    staging-section-width: external.width;
-                    button-width: external.width;
-                }
             }
 
             page3 := AppSettings {

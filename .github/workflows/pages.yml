@@ -34,7 +34,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.rustup/toolchains/esp1
+            ~/.rustup/toolchains/esp190
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
@@ -47,33 +47,26 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------
-      # espup: installs the Xtensa Rust fork + LLVM toolchain into
-      #        ~/.rustup/toolchains/esp  and writes ~/export-esp.sh
+      # espup: installs the project-compatible Xtensa Rust fork + LLVM.
       # Skip if the toolchain directory already exists (cache hit).
       # ------------------------------------------------------------------
       - name: Install espup (if not cached)
         run: |
           command -v espup || cargo install espup
-          # Install toolchain if not already cached.
-          # Try --name esp1 (espup >= 0.12); older versions only support the default name "esp".
-          # In either case we ensure ~/.rustup/toolchains/esp1 exists (symlink if needed)
-          # because core/rust-toolchain.toml sets channel = "esp1".
-          if [ ! -d "$HOME/.rustup/toolchains/esp1" ]; then
-            if espup install --name esp1 2>/dev/null; then
-              echo "Installed Xtensa toolchain as 'esp1'"
-            else
-              espup install
-              ln -sf "$HOME/.rustup/toolchains/esp" "$HOME/.rustup/toolchains/esp1"
-              echo "Installed Xtensa toolchain as 'esp', symlinked to 'esp1'"
-            fi
+          # esp-wifi-sys 0.8.1 does not compile with newer Xtensa Rust forks.
+          if [ ! -d "$HOME/.rustup/toolchains/esp190" ]; then
+            espup install \
+              --name esp190 \
+              --toolchain-version 1.90.0.0 \
+              --targets esp32s3 \
+              --export-file "$HOME/export-esp190.sh"
           fi
-          # espup may write export-esp.sh or export-esp1.sh depending on version
-          for f in "$HOME/export-esp1.sh" "$HOME/export-esp.sh"; do
+          for f in "$HOME/export-esp190.sh"; do
             [ -f "$f" ] && source "$f" && break
           done
           # Persist LLVM/Clang vars so subsequent steps pick them up (PATH is handled separately)
           env | grep -E '^(LIBCLANG_PATH|CLANG_PATH|LIBCLANG_BIN_PATH)=' >> "$GITHUB_ENV" || true
-          XTENSA_BIN=$(find "$HOME/.rustup/toolchains/esp1" -name "xtensa-esp32s3-elf-gcc" | head -1 | xargs dirname)
+          XTENSA_BIN=$(find "$HOME/.rustup/toolchains/esp190" -name "xtensa-esp32s3-elf-gcc" | head -1 | xargs dirname)
           echo "$XTENSA_BIN" >> "$GITHUB_PATH"
 
       - name: Install espflash (if not cached)

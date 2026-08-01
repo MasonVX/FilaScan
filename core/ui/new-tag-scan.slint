@@ -365,25 +365,19 @@ component SpoolDisplayStep inherits Rectangle {
         SpoolDisplay {
             show-title: true;
             spool-display: root.spool-display;
-            title: AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag ? "Spool Tag Information" : "";
+            title: AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag ? "Bambu Filament erkannt" : "";
             mode: AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag ? SpoolDisplayMode.ImportTagDefinition : SpoolDisplayMode.Normal;
         }
 
         WizardButtons {
-            back-enabled: true;
-            next-enabled: true;
+            back-enabled: AppState.new-tag-scan-tag-type == NewScannedTagType.SimpleTag;
+            next-enabled: AppState.new-tag-scan-tag-type == NewScannedTagType.SimpleTag;
             cancel-enabled: true;
-            cancel-text: root.cancel-text;
-            next-text: AppState.new-tag-scan-tag-type == NewScannedTagType.SimpleTag ? "✓ Link Tag" + (root.last-step ? "" : " ▶") : "✓ Import ▶";
+            cancel-text: AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag ? Translations.tr-close : root.cancel-text;
+            next-text: "✓ Link Tag" + (root.last-step ? "" : " ▶");
             back-clicked => {
                 if AppState.new-tag-scan-tag-type == NewScannedTagType.SimpleTag {
                     AppState.new-tag-scan-page = NewTagScanPage.SpoolSelect;
-                } else if AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag {
-                    if AppState.new-tag-scan-definition-type == "Bambu Lab" {
-                        AppState.new-tag-scan-page = NewTagScanPage.BambulabSpoolTypeSelection;
-                    } else {
-                        AppState.new-tag-scan-page = NewTagScanPage.SpoolDefinitionTagScanned;
-                    }
                 }
             }
             next-clicked => {
@@ -393,11 +387,6 @@ component SpoolDisplayStep inherits Rectangle {
                 // perform action
                 if AppState.new-tag-scan-tag-type == NewScannedTagType.SimpleTag {
                     AppBackend.link_tag_to_spool_id(AppState.new-tag-scan-tag-id, AppState.new-tag-scan-definition-type, AppState.new-tag-scan-spool-id, last-step);
-                } else {
-                  // TODO: Add call to AppBackend to add spool record, which will 
-                  // (1) import the tag to the inventory & set it as recently added spool
-                  // (2) once completed will trigger move here to next step
-                  AppBackend.import-definition-tag-to-inventory(AppState.new-tag-scan-definition-type, AppState.new-tag-scan-definition-info, AppState.new-tag-scan-empty-spool-weight);
                 }
             }
             cancel-clicked => {

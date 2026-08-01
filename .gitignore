@@ -4,3 +4,4 @@ shared/target/
 
 # Generated firmware binaries (built by CI, not committed)
 docs/firmware/*.bin
+build/*.bin

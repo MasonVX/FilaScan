@@ -690,7 +690,9 @@ export global AppState {
     public function new-definition-tag-scanned(definition-type: string, tag-id: string, definition-info: string) {
         self.new-tag-scan-definition-type = definition-type; // Bambu Lab, OpenPrintTag, Creality, etc. - in the future can unite with V1-Tag
         self.new-tag-scan-tag-type = NewScannedTagType.DefinitionTag;
-        self.new-tag-scan-page = NewTagScanPage.SpoolDefinitionTagScanned;
+        // Reader-first flow: show decoded material and color immediately.
+        // Inventory import remains intentionally outside the scan path.
+        self.new-tag-scan-page = NewTagScanPage.SpoolDisplay;
         self.new-tag-operation = NewTagOperation.None;
         self.new-tag-scan-status = "";
         self.new-tag-scan-spool-id = "";

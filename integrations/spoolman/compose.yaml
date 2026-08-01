@@ -1,0 +1,12 @@
+services:
+  spoolman-bridge:
+    build: .
+    restart: unless-stopped
+    environment:
+      # Use the reader's LAN address, for example http://spoolease.local.
+      READER_URL: ${READER_URL}
+      SPOOLMAN_URL: ${SPOOLMAN_URL:-http://host.docker.internal:7912}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-1}
+      # Safe default: create/update the filament definition only. Bambu spools
+      # often have two physical tags, so automatic spool creation is opt-in.
+      SPOOLMAN_CREATE_SPOOL: ${SPOOLMAN_CREATE_SPOOL:-false}

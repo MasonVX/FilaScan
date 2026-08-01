@@ -104,6 +104,26 @@ pub struct ViewModel {
     store_state_request_channel: Rc<StoreStateRequestChannel>,
     pub app_ota_request_channel: Rc<AppOtaRequestChannel>,
     pub scale_version: Option<String>,
+    last_reader_scan: Option<ReaderScan>,
+    reader_scan_sequence: u32,
+}
+
+/// Public, inventory-agnostic representation of the last factory-tag scan.
+/// Consumers such as the Spoolman bridge intentionally depend on this small
+/// DTO rather than the internal SpoolEase inventory schema.
+#[derive(Debug, Serialize, Clone)]
+pub struct ReaderScan {
+    pub sequence: u32,
+    pub tag_type: String,
+    pub tag_id: String,
+    pub spool_uid: String,
+    pub vendor: String,
+    pub material_id: String,
+    pub material: String,
+    pub variant: String,
+    pub color_name: String,
+    pub color_hex: String,
+    pub nominal_weight_g: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -113,6 +133,10 @@ struct EncodeCookie {
 }
 
 impl ViewModel {
+    pub fn last_reader_scan_json(&self) -> String {
+        serde_json::to_string(&self.last_reader_scan).unwrap_or_else(|_| "null".to_string())
+    }
+
     pub fn new(
         // Framework
         stack: Stack<'static>,
@@ -190,6 +214,8 @@ impl ViewModel {
             store_state_request_channel: Rc::new(StoreStateRequestChannel::new()),
             app_ota_request_channel: Rc::new(AppOtaRequestChannel::new()),
             scale_version: None,
+            last_reader_scan: None,
+            reader_scan_sequence: 0,
         };
         let view_model_rc = Rc::new(RefCell::new(view_model));
 
@@ -492,7 +518,17 @@ impl ViewModel {
         let mut printer_number = 1; // starts from one and incremented for any printer
         let mut printer_index = 0; // starts from zero and incremented only on successful init and adding to array
         let mut available_printers: Vec<SharedString> = Vec::new();
-        for printer_config in &self.app_config.borrow().configured_printers.printers {
+        if crate::settings::READER_ONLY_MODE {
+            term_info!("Reader-only mode: printer MQTT integrations are disabled");
+        }
+        for printer_config in self
+            .app_config
+            .borrow()
+            .configured_printers
+            .printers
+            .iter()
+            .filter(|_| !crate::settings::READER_ONLY_MODE)
+        {
             if printer_number > 5 {
                 term_info!("Printers limit reached - max five printers supported");
                 break;
@@ -1174,6 +1210,11 @@ impl ViewModel {
     }
 
     fn ui_ota_update_firmware(&self, product: &str, train: &str) {
+        if crate::settings::READER_ONLY_MODE {
+            term_info!("Reader-only mode: upstream OTA updates are disabled");
+            return;
+        }
+
         let train = match train {
             "stable" => AppOtaTrain::Stable,
             "unstable" => AppOtaTrain::Unstable,
@@ -1214,6 +1255,11 @@ impl ViewModel {
     }
 
     fn ui_ota_check_firmwares(&self) {
+        if crate::settings::READER_ONLY_MODE {
+            term_info!("Reader-only mode: upstream OTA checks are disabled");
+            return;
+        }
+
         channel_send(&self.app_ota_request_channel, AppOtaRequest::CheckOta {});
     }
 
@@ -2855,19 +2901,39 @@ impl SpoolTagObserver for ViewModel {
                 }
                 spool_tag::ReadResult::BambulabTag { uid, data } => {
                     let hex_tag = hex::encode_upper(uid);
-                    if let Some(spool_rec) = self.store.get_spool_by_hex_tag(&hex_tag) {
-                        self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Scanned);
-                        self.display_filament_staging(true);
-                        let _ = self.dispatch_async_task(AppAsyncTaskRequest::SetStagingRecExt {});
-                    } else if let Some(blocks) = data {
+                    // Prefer the live factory payload over a potentially stale
+                    // local inventory entry. This is the core reader workflow.
+                    if let Some(blocks) = data {
                         let bambu_tag = BambuLabTag::new(&hex_tag, blocks);
-                        let bamtu_tag_str = serde_json::to_string(&bambu_tag).unwrap();
+                        let spool_rec = bambu_tag.to_spool_rec();
+                        self.reader_scan_sequence = self.reader_scan_sequence.wrapping_add(1);
+                        self.last_reader_scan = Some(ReaderScan {
+                            sequence: self.reader_scan_sequence,
+                            tag_type: BAMBULAB_TAG_TYPE.to_string(),
+                            tag_id: bambu_tag.tag_id().to_string(),
+                            spool_uid: bambu_tag.tray_uid(),
+                            vendor: "Bambu Lab".to_string(),
+                            material_id: bambu_tag.material_id(),
+                            material: spool_rec.material_type.clone(),
+                            variant: spool_rec.material_subtype.clone(),
+                            color_name: spool_rec.color_name.clone(),
+                            color_hex: spool_rec.color_code.clone(),
+                            nominal_weight_g: spool_rec.weight_advertised,
+                        });
+
+                        let bambu_tag_str = serde_json::to_string(&bambu_tag).unwrap();
                         let ui = self.ui_weak.clone();
                         ui.unwrap().global::<crate::app::AppState>().invoke_new_definition_tag_scanned(
                             BAMBULAB_TAG_TYPE.to_shared_string(),
                             hex_tag.into(),
-                            bamtu_tag_str.into(),
+                            bambu_tag_str.into(),
                         );
+                    } else if let Some(spool_rec) = self.store.get_spool_by_hex_tag(&hex_tag) {
+                        // Fallback for an unreadable payload on a previously
+                        // imported tag.
+                        self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Scanned);
+                        self.display_filament_staging(true);
+                        let _ = self.dispatch_async_task(AppAsyncTaskRequest::SetStagingRecExt {});
                     }
                 }
             },

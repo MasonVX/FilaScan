@@ -37,6 +37,10 @@ pub struct BambuLabTag {
 // color_name
 // https://raw.githubusercontent.com/bambulab/BambuStudio/refs/heads/master/resources/profiles/BBL/filament/filaments_color_codes.json
 impl BambuLabTag {
+    pub fn tag_id(&self) -> &str {
+        &self.tag_id
+    }
+
     pub fn _material_variant_id(&self) -> String {
         // A00-G1 (Block 1, index 0..=7)
         self.get_block_cstr(1, 0, 8)
@@ -44,6 +48,10 @@ impl BambuLabTag {
     pub fn material_id(&self) -> String {
         // GFA00 (Block 1a (Block 1, index 8..=15)
         self.get_block_cstr(1, 8, 8)
+    }
+    pub fn tray_uid(&self) -> String {
+        // Physical spool identifier shared by the two factory tags (Block 9).
+        self.get_block_cstr(9, 0, 16)
     }
     pub fn _filament_type(&self) -> String {
         // PLA (Block 2) (Block 2, all)

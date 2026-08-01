@@ -17,6 +17,11 @@ pub const WEB_APP_KEY_DERIVATION_ITERATIONS: u32 = 10_000; // to be aligned with
 
 pub const MAX_NUM_PRINTERS: usize = 5;
 
+/// This fork is deliberately a filament reader, not a printer/AMS manager.
+/// Existing printer credentials can remain in flash, but no MQTT connection is
+/// opened while this is enabled.
+pub const READER_ONLY_MODE: bool = true;
+
 // Framework basic OTA (from web-config)
 pub const OTA_DOMAIN: &str = OTA_DOMAIN_STABLE;
 pub const OTA_PATH: &str = CONSOLE_STABLE_OTA_PATH;
