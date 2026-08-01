@@ -1,201 +1,301 @@
-# SpoolEase System
+# FilaScan
 
-> **This is a community fork of [yanshay/SpoolEase](https://github.com/yanshay/SpoolEase).**
-> See [Differences from Upstream](#differences-from-upstream) for what this fork adds.
+**FilaScan is a dedicated, source-available RFID reader for identifying filament
+spools and forwarding their metadata to external filament-management systems.**
 
-SpoolEase is a smart add-on system for Bambu Lab 3D printers that adds intelligence and control to every filament spool.
+Hold a supported Bambu Lab filament spool against the reader and FilaScan
+immediately displays its material, variant, color, and nominal weight. The most
+recent scan is also exposed through a small HTTP API for integrations such as
+[Spoolman](https://github.com/Donkie/Spoolman).
 
-It features:
-- NFC tags for automatic spool identification (see below supported tags and formats)
-- Comprehensive spool inventory management system - keep your spools organized
-- Precise dual method filament weight tracking using (1) weight scale, (2) print usage monitoring, combined with a very streamlined workflow - so you can tell how much filament is available in every spool
-- Flexible storage system - with both structured and free-form locations, NFC location tags, streamlined and easy to use - so you can tell where each spool is at any given time
-- Automatic slot configuration for material, color, pressure advance (K) - simplify printing and reduce errors
-- Virtual Spool Label for viewing spool info on your mobile device
-- Compatibility with your slicer filament settings
-- Serves as backup for your pressure advance settings (for when the printer loses them — and yes, it happens)
+FilaScan reuses the proven ESP32-S3 display and PN532 reader hardware from
+SpoolEase, but deliberately removes the printer-centric workflow from the user
+experience. It does not connect to a Bambu printer over MQTT and does not use
+the embedded SpoolEase inventory as the system of record.
 
-- Supports most common NFC tags - NTAG (recommended 215 and above) and Mifare Classic (with Mifare no support yet for virtual label feature)
-- Supports data import from and use of Bambu Lab filament RFID tags
-- Supports Bambu Lab X1, P1, A1, H2, P2 product lines with AMS-Lite, AMS, AMS2-Pro and AMS-HT
-- Supports multiple printers simultaneously (within resource limits)
-- More ...
+> [!NOTE]
+> FilaScan is an independent community project. It is not affiliated with,
+> endorsed by, or maintained by Bambu Lab or the SpoolEase maintainers.
 
-The system includes two products:  
-- **SpoolEase Console** – The main hub with a display, managing inventory, weight tracking, AMS/External slot configuration, and showing AMS/External filament status. It works independently, but some features require SpoolEase Scale, so using both is recommended.
-- **SpoolEase Scale** – Measures spool weight and feeds data to the Console. SpoolEase Scale depends on SpoolEase Console to operate.
+## Project intent
 
-SpoolEase works well together with the [SpoolEase NFC tag holder](https://makerworld.com/en/models/2050083) that supports easily swappable NFC tag, material type and spool-id labels for spool reuse purpose.
+FilaScan is designed around one focused interaction:
 
-And most importantly, even though it’s an open-source project, it’s fun and easy to build and surprisingly simple to set up!
+1. Present a filament spool to the RFID reader.
+2. See the filament identity on the device immediately.
+3. Make the scan available to another system over the local network.
 
-- [Documentation](https://docs.spoolease.io/docs/welcome)
-- [Flashing Web Site](https://www.spoolease.io)
-- [Translation Upload Page](https://mybesttools.github.io/SpoolEase/translations-upload.html)
-- [Reddit](https://www.reddit.com/r/SpoolEase/)
-- [Discord Server](https://discord.gg/6brKUCERcQ)
+The device should remain useful without a printer connection, cloud service,
+or built-in inventory. External applications decide what to do with a scan.
+Spoolman is the first supported integration, but the reader API is intentionally
+small and application-independent.
 
-## Show Your Appreciation  
-A **tremendous** amount of effort has gone into this project and continues to go in.  
-If you find it valuable or helpful, please **Boost** the 3D models on MakerWorld and ⭐ **Star** the GitHub repo.
+This fork currently targets **Bambu Lab factory RFID tags**. Reading is passive:
+FilaScan does not modify or overwrite the factory tag.
 
-<div align="center">
-  <a href="https://www.star-history.com/#yanshay/spoolease&Date">
-    <img src="https://api.star-history.com/svg?repos=yanshay/spoolease&type=Date)" height="300px">
-  </a>
-</div>
+## Current features
 
-## Inventory Management (Press to Enlarge)
-<a href="readme/inventory-screenshot.png">
-  <img src="readme/inventory-screenshot.png">
-</a>
+- Immediate on-device display of:
+  - material and material ID
+  - filament variant
+  - color name and hexadecimal color value
+  - nominal spool weight
+- Physical-spool identification using the shared spool UID stored on both
+  factory tags
+- Reader-only mode with all Bambu printer MQTT integrations disabled
+- Upstream OTA checks disabled, preventing a FilaScan installation from being
+  replaced by SpoolEase firmware
+- Read-only HTTP endpoint containing the latest scan
+- Optional Spoolman synchronization bridge
+- Native, reproducible macOS build and flash scripts
+- Original WT32-SC01 Plus display and PN532 wiring preserved
 
-## A Few SpoolEase Console Screenshots
-| While Printing (Weight Tracking in AMS) | Weighting Spool for Available  Filament|
-|:--------:|:---------:|
-| ![Printing](readme/printing.png) | ![Scale](readme/scale-loaded.png) |
-| Spool Operations | Spool Information |
-| ![Staging Operations](readme/staging-more.png) | ![Spool Information](readme/spool-information.png) |
+## Hardware
 
-## Press Below for (outdated) Video Demonstration of SpoolEase Console  
-**SpoolEase now offers far more features than shown in these videos! See the latest in the docs.**
+The currently supported device is the original SpoolEase Console hardware:
 
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=WKIBzVbrhOg">
-    <img src="https://img.youtube.com/vi/WKIBzVbrhOg/0.jpg" height="400px">
-  </a>
-  <a href="">
-    <img src="readme/virtual-tag.png" height="400px">
-  </a>
-</div>
+- **MCU/display:** WT32-SC01 Plus with ESP32-S3 and 16 MB flash
+- **RFID reader:** PN532 connected over SPI
+- **USB:** ESP32-S3 USB JTAG/serial interface for flashing and monitoring
 
-## Press Below for Video Demonstration of SpoolEase Scale
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=3tB1VMCOK6c">
-    <img src="readme/scale-youtube-cover.jpg" height="400px">
-  </a>
-</div>
+### PN532 wiring
 
----
+FilaScan preserves the upstream pin assignment:
 
-**Notice:** This is a new project - while it has been installed by many happy users, new users should be aware that there are no warranties, liabilities, or guarantees, and they assume all risks involved.
+| PN532 signal | ESP32-S3 GPIO |
+|---|---:|
+| IRQ | 14 |
+| SCK | 13 |
+| MOSI | 11 |
+| MISO | 12 |
+| CS | 10 |
 
-## Collaboration
+The SPI interface runs in mode 0 at 2 MHz. Display, touch, SD-card, and power
+wiring are unchanged from the upstream SpoolEase Console. Refer to the
+[SpoolEase Console build documentation](https://docs.spoolease.io/docs/build-setup/console-build)
+for the original assembly instructions.
 
-- For discussions, support and general discussions best to join SpoolEase [Discord Server](https://discord.gg/6brKUCERcQ)
-- For questions, feedback, comments, etc. please use the [Repo discussions area](https://github.com/yanshay/SpoolEase/discussions)
-- For getting notified on important updates, subscribe to the [Announcements Discussion](https://github.com/yanshay/SpoolEase/discussions/7)
-- It would be real cool if you post your build in the [Introduce Your Build Discussion](https://github.com/yanshay/SpoolEase/discussions/8)
+## Building on macOS
 
-**I’d also greatly appreciate it if you could star SpoolEase GitHub repo.**
+### Prerequisites
 
-## Licensing Information
+- macOS (tested on Apple Silicon)
+- [Homebrew](https://brew.sh/)
+- A WT32-SC01 Plus connected over USB
 
-This project (including hardware designs, software, and case files) is freely available for you to build and use for any purpose, including within commercial environments. However, you may not profit from redistributing or commercializing the project itself. Specifically prohibited activities include:
+The bootstrap script installs `rustup`, CMake, Ninja, and `pkgconf` with
+Homebrew, then installs `espup` and `espflash` with Cargo. It also installs the
+pinned Espressif Rust toolchain required by the upstream dependencies.
 
-- Selling assembled devices based on this project
-- Selling kits or components packaged for this project
-- Charging for the software or hardware designs
-- Selling modified versions or derivatives
-- Integrating the product, with or without modifications, into a commercial server offering, whether cloud-based or on-premise
-- Offering paid installation, configuration, or support services specific to this project
+```bash
+./scripts/bootstrap-macos.sh
+```
 
-To be clear: You CAN use this device in your business operations, even if those operations generate revenue. You CANNOT make money by selling, distributing, or providing services specifically related to this project or its components.
+FilaScan currently pins the Espressif toolchain to `1.90.0.0`. Newer toolchains
+are not compatible with the upstream `esp-wifi-sys 0.8.1` dependency.
 
-If you're interested in commercial licensing, redistribution rights, or other activities not permitted under these terms, please contact SpoolEase at gmail dot com for potential partnership opportunities.
+### Build the firmware
 
-## Detailed Instructions  
+```bash
+./scripts/build-firmware.sh
+```
 
-**Important:** Make Sure to Use Follow Docuemntation for Your Version.  
+The build produces a merged 16 MB flash image at:
 
-- **SpoolEase Console**  
-  [Build](https://docs.spoolease.io/docs/build-setup/console-build)  
-  [Setup](https://docs.spoolease.io/docs/build-setup/console-setup)  
+```text
+build/bambu-rfid-reader.bin
+```
 
-- **SpoolEase Scale**  
-  [Build](https://docs.spoolease.io/docs/build-setup/scale-build)  
-  [Setup](https://docs.spoolease.io/docs/build-setup/scale-setup)
+The upstream executable is still named `SpoolEase` internally. This is an
+implementation detail and does not affect the build or flash procedure.
 
-- **System Information**  
-  [Usage](https://docs.spoolease.io/docs/quickstart/basic-usage-flows)  
-  [Troubleshooting](https://docs.spoolease.io/docs/troubleshooting)
+### Flash the device
 
-## Third Party Attributions
-SpoolScale uses the following sources for it's Spools Catalog:  
-- Scuk's "Empty Spool Weight Catalog": https://www.printables.com/model/464663-empty-spool-weight-catalog
-- https://www.onlyspoolz.com/portfolio/
+Find the serial device if necessary:
 
----
+```bash
+ls /dev/cu.usbmodem*
+```
 
-## Differences from Upstream
+Then flash the firmware:
 
-This fork ([mybesttools/SpoolEase](https://github.com/mybesttools/SpoolEase)) is based on [yanshay/SpoolEase](https://github.com/yanshay/SpoolEase) and extends it with the following changes.
+```bash
+./scripts/flash-device.sh /dev/cu.usbmodem31101
+```
 
-### Multilingual UI, Config Page, and Web Inventory
+The script defaults to `/dev/cu.usbmodem31101` when no port is supplied. It
+does not perform a full flash erase, so existing Wi-Fi/NVS settings are normally
+preserved.
 
-The on-device UI (Slint), the web config page (`config.html`), and the web inventory are fully translated.
-Supported languages: **English, German (de), French (fr), Dutch (nl), Polish (pl)**.
+For first-time Wi-Fi provisioning, use the original
+[SpoolEase Console setup instructions](https://docs.spoolease.io/docs/build-setup/console-setup).
 
-- Language selection persists in the browser and on the device.
-- Translation strings are stored in `core/translations/<lang>.json` and embedded at build time via `core/translations.slint` and `build.rs`.
-- The CSV inventory toolbar (export, column visibility, search) is translated in all languages.
+## Reader API
 
-### Translation Upload Page
+The latest successful scan is available on the device at:
 
-A hosted GitHub Pages page at  
-[`/SpoolEase/translations-upload.html`](https://mybesttools.github.io/SpoolEase/translations-upload.html)  
-lets contributors submit a new language translation without needing to fork the repository.
+```http
+GET /api/reader/last-scan
+```
 
-- Authenticates via **GitHub Device Flow** (click a button, enter a code at `github.com/login/device` — no personal access token needed).
-- After authentication, the user uploads a `.json` file; the worker validates it, commits it to a new branch, and opens a Pull Request automatically.
-- Backed by a Cloudflare Worker (`workers/translation-oauth/`) that uses a bot token for all write operations; contributors need no repo access.
+Before the first scan, the endpoint returns:
 
-### GitHub Actions CI/CD — Flash-from-Browser
+```json
+null
+```
 
-A GitHub Actions workflow (`.github/workflows/pages.yml`) builds the firmware on every push to `main` and deploys the result to GitHub Pages:
+Example response after scanning a spool:
 
-- Builds a merged flash image (`SpoolEase-flash.bin`) with `espflash save-image`.
-- Stamps the version from `Cargo.toml` into `docs/firmware/manifest.json` (upgrade) and generates `manifest-new.json` (fresh install with Improv Wi-Fi).
-- Deploys the full `docs/` folder to GitHub Pages, making firmware always available for flashing at [`docs/flash.html`](https://mybesttools.github.io/SpoolEase/flash.html).
+```json
+{
+  "sequence": 1,
+  "tag_type": "Bambu Lab",
+  "tag_id": "A1B2C3D4",
+  "spool_uid": "0102030405060708",
+  "vendor": "Bambu Lab",
+  "material_id": "GFA00",
+  "material": "PLA",
+  "variant": "Basic",
+  "color_name": "Jade White (#FFFFFF)",
+  "color_hex": "FFFFFFFF",
+  "nominal_weight_g": 1000
+}
+```
 
-### Inventory: Additional Spool Fields
+`sequence` increases for every successful scan. `tag_id` identifies the
+individual RFID chip, while `spool_uid` identifies the physical spool and is
+shared by the two factory tags attached to it.
 
-Three new fields added to `SpoolRecord` and surfaced in the web inventory:
+Example request:
 
-| Field | Description |
+```bash
+curl http://filascan.local/api/reader/last-scan
+```
+
+The actual hostname or IP address depends on the local network configuration.
+
+### API security
+
+The endpoint is intentionally read-only and unauthenticated. It exposes scan
+metadata only; it does not expose Wi-Fi credentials, printer credentials,
+inventory records, or the device security key.
+
+Use FilaScan only on a trusted local network. Do not expose the device directly
+to the internet or forward its HTTP port from a router.
+
+## Spoolman integration
+
+The bridge in [`integrations/spoolman`](integrations/spoolman) polls FilaScan
+and synchronizes new scans through the official Spoolman REST API.
+
+By default it creates missing Bambu Lab vendor and filament definitions only.
+Automatic creation of physical spool records is opt-in. When enabled, the
+bridge uses `spool_uid` to avoid creating two records for the two RFID tags on
+one spool.
+
+### Run with Python
+
+The bridge uses only the Python standard library:
+
+```bash
+READER_URL=http://filascan.local \
+SPOOLMAN_URL=http://spoolman.local:7912 \
+python3 integrations/spoolman/spoolman_bridge.py
+```
+
+Available environment variables:
+
+| Variable | Required | Default | Description |
+|---|:---:|---|---|
+| `READER_URL` | yes | — | Base URL of the FilaScan device |
+| `SPOOLMAN_URL` | yes | — | Base URL of the Spoolman server |
+| `POLL_INTERVAL_SECONDS` | no | `1` | Delay between reader polls |
+| `SPOOLMAN_CREATE_SPOOL` | no | `false` | Create physical spool records |
+| `LOG_LEVEL` | no | `INFO` | Python logging level |
+
+To opt in to physical spool creation:
+
+```bash
+SPOOLMAN_CREATE_SPOOL=true \
+READER_URL=http://filascan.local \
+SPOOLMAN_URL=http://spoolman.local:7912 \
+python3 integrations/spoolman/spoolman_bridge.py
+```
+
+### Run with Docker Compose
+
+```bash
+cd integrations/spoolman
+cp .env.example .env
+# Edit READER_URL and SPOOLMAN_URL in .env.
+docker compose up -d --build
+```
+
+The bridge host must be able to reach both FilaScan and Spoolman. If the reader
+is connected over Wi-Fi and the bridge runs on a wired host, ensure that the
+router permits communication between those network segments and that wireless
+client isolation is disabled.
+
+## Repository layout
+
+| Path | Purpose |
 |---|---|
-| `assigned_location` | The storage location a spool is assigned to |
-| `actual_location` | Where the spool physically is right now |
-| `spools_count` | Number of spools at this entry (defaults to 1 for backward compat) |
+| `core/` | ESP32-S3 firmware and Slint device UI |
+| `shared/` | Shared NFC, networking, and device components inherited from SpoolEase |
+| `integrations/spoolman/` | Optional FilaScan-to-Spoolman bridge |
+| `scripts/` | macOS bootstrap, build, and flash commands |
+| `docs/` | Upstream web assets and flashing support |
 
-The inventory CSV renderer and column visibility controls are updated accordingly.
+## Upstream projects and attribution
 
-### Inventory and Config Page Bug Fixes
+FilaScan exists because of the substantial work done by the SpoolEase authors
+and contributors. Its history is derived from two upstream repositories:
 
-- Fixed inventory link and column padding for records from older database versions.
-- Fixed JS compatibility for 0.6.1 firmware: appends the 3 new CSV columns so old DB records render without layout breakage.
-- Fixed `SpoolRecord` to include all required fields in the Bambu API path (`bambu.rs`).
+1. **[yanshay/SpoolEase](https://github.com/yanshay/SpoolEase)** — the original
+   SpoolEase project. It provides the console hardware design, ESP32 firmware
+   architecture, display UI foundation, PN532 support, RFID decoding, Wi-Fi
+   provisioning, and the original filament-management system.
+2. **[mybesttools/SpoolEase](https://github.com/mybesttools/SpoolEase)** — the
+   intermediate community fork from which FilaScan was created. It adds
+   multilingual UI and web pages, translation tooling, CI/CD improvements, and
+   inventory-related fixes on top of the original project.
 
-### Build and Deploy Improvements
+FilaScan retains the hardware support and low-level reader implementation while
+changing the product direction to a focused RFID appliance and integration
+source. It intentionally disables the printer MQTT workflow, bypasses the
+embedded inventory during Bambu factory-tag scans, adds a purpose-built reader
+screen, exposes a minimal scan API, and provides the Spoolman bridge.
 
-- `deploy-vars.sh`: falls back to the Cargo git cache when the `deps/` submodule is absent (useful in CI).
-- `deploy-beta.sh`, `deploy-debug.sh`, `deploy-rel.sh`: updated paths and flags for the 0.6.x toolchain.
-- Added `deploy-shell-init.sh` for environment setup on the dev machine.
-- Toolchain caching in CI keyed on `Cargo.lock` + `rust-toolchain.toml`.
+Additional references:
 
-### `rel="noopener noreferrer"` on External Links
+- [SpoolEase documentation](https://docs.spoolease.io/docs/welcome)
+- [Spoolman](https://github.com/Donkie/Spoolman)
+- [Bambu Research Group RFID Tag Guide](https://github.com/Bambu-Research-Group/RFID-Tag-Guide)
+- [NXP PN532 documentation](https://www.nxp.com/products/rfid-nfc/nfc-hf/nfc-readers/standard-performance-mifare-and-ntag-frontend:PN5321A3HN)
 
-All `target="_blank"` links in `docs/flash.html` and `docs/index.html` have `rel="noopener noreferrer"` added for security best practice.
+Please give credit to the upstream projects when publishing builds or derived
+work.
+
+## Scope and future direction
+
+FilaScan is intentionally smaller in scope than SpoolEase. Planned work should
+support the reader-and-integration use case rather than rebuild a second local
+inventory system. Suitable future improvements include:
+
+- support for additional manufacturer and open spool-tag formats
+- a stable, versioned reader API
+- push-based integration events in addition to polling
+- configurable integration targets
+- simplified first-time setup under the FilaScan name
+
+Printer control, AMS management, print monitoring, and comprehensive on-device
+inventory management are explicitly outside the primary project scope.
 
 ## License
 
-This software is licensed under Apache License, Version 2.0 **with Commons Clause** - see [LICENSE.md](LICENSE.md).
+FilaScan is distributed under the inherited **Apache License 2.0 with Commons
+Clause** terms. See [`LICENSE.md`](LICENSE.md) for the complete license and
+commercial-use restrictions.
 
-- ✅ Free for use
-- ❌ Cannot be sold, offered as a service, or used for consulting, see [LICENSE.md](LICENSE.md) for more details
-- 📧 For commercial licensing inquiries about restricted uses, contact: **SpoolEase at Gmail dot Com**
-
-### Contribution Notice
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
-the work by you, shall be licensed as above, without any additional terms or conditions.
+Unless stated otherwise, contributions submitted to this repository are made
+under the same license terms.
