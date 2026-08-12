@@ -9,32 +9,91 @@
   <body>
     <main>
       <h1>FilaScan</h1>
-      <p class="subtitle">Wi-Fi setup and live diagnostics</p>
+      <p class="subtitle" data-i18n="subtitle">Wi-Fi, Bambu catalog, FilaMan, and live diagnostics</p>
 
       <section class="log-section">
         <div class="log-heading">
-          <h2>Device log</h2>
+          <h2 data-i18n="deviceLog">Device log</h2>
           <span id="log-status" class="connection-status">Connecting…</span>
         </div>
         <pre id="log-output" aria-live="polite">Waiting for diagnostic output…</pre>
       </section>
 
       <section>
-        <label for="security-key">Setup key</label>
+        <label for="security-key" data-i18n="setupKey">Setup key</label>
         <input id="security-key" type="password" autocomplete="current-password" placeholder="Shown on the FilaScan display">
-        <button id="verify" type="button">Unlock</button>
+        <button id="verify" type="button" data-i18n="unlock">Unlock</button>
         <p id="key-status" class="status"></p>
       </section>
 
+      <section id="language" hidden>
+        <h2 data-i18n="language">Language</h2>
+        <label for="display-language" data-i18n="displayLanguage">Display and web interface</label>
+        <select id="display-language">
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+        </select>
+        <button id="language-save" type="button" data-i18n="saveLanguage">Save language</button>
+        <p id="language-status" class="status"></p>
+      </section>
+
       <section id="wifi" hidden>
-        <label for="ssid">Wi-Fi network (SSID)</label>
+        <h2>Wi-Fi</h2>
+        <label for="ssid" data-i18n="wifiNetwork">Wi-Fi network (SSID)</label>
         <input id="ssid" type="text" autocomplete="off">
 
-        <label for="password">Wi-Fi password</label>
+        <label for="password" data-i18n="wifiPassword">Wi-Fi password</label>
         <input id="password" type="password" autocomplete="new-password">
 
-        <button id="save" type="button">Save and restart</button>
+        <button id="save" type="button" data-i18n="saveRestart">Save and restart</button>
         <p id="save-status" class="status"></p>
+      </section>
+
+      <section id="catalog" hidden>
+        <h2 data-i18n="catalog">Bambu filament catalog</h2>
+        <p class="section-description" data-i18n="catalogDescription">The catalog is downloaded directly from BambuStudio and cached on the SD card.</p>
+
+        <label for="catalog-url" data-i18n="catalogUrl">Catalog JSON URL</label>
+        <input id="catalog-url" type="url" autocomplete="off" spellcheck="false">
+
+        <label class="checkbox-row" for="catalog-auto-update">
+          <input id="catalog-auto-update" type="checkbox">
+          <span data-i18n="autoUpdate">Update automatically every 24 hours</span>
+        </label>
+
+        <div class="button-row">
+          <button id="catalog-save" type="button" data-i18n="saveCatalog">Save catalog settings</button>
+          <button id="catalog-update" class="secondary" type="button" data-i18n="updateNow">Update now</button>
+        </div>
+        <p id="catalog-status" class="status">Catalog status unavailable.</p>
+      </section>
+
+      <section id="filaman" hidden>
+        <h2 data-i18n="filamanIntegration">FilaMan integration</h2>
+        <p class="section-description" data-i18n="filamanDescription">Choose a regular FilaMan storage location before adding a new spool, or press an existing spool's location button to move it. Bambu AMS locations are excluded. The Tray UID is used as external_id; the NFC Tag UID is never transmitted.</p>
+
+        <label for="filaman-url" data-i18n="filamanUrl">FilaMan URL</label>
+        <input id="filaman-url" type="url" autocomplete="off" spellcheck="false" placeholder="http://192.168.5.20:8000">
+        <p class="field-help" data-i18n="httpHelp">HTTP is supported for trusted local networks but sends the device token and spool data without transport encryption.</p>
+
+        <label for="filaman-token" data-i18n="deviceToken">Device access token</label>
+        <input id="filaman-token" type="password" autocomplete="off" spellcheck="false" placeholder="dev.…">
+        <p class="field-help" data-i18n="tokenHelp">The FilaScan integration plugin must be installed in FilaMan and authorize this registered device. General inventory scopes are not required.</p>
+
+        <label for="filaman-ca" data-i18n="caCertificate">TLS CA certificate (PEM, HTTPS only)</label>
+        <textarea id="filaman-ca" rows="7" autocomplete="off" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+        <p class="field-help" data-i18n="caHelp">Optional for HTTP. For HTTPS, use the CA certificate that issued the certificate for your FilaMan hostname.</p>
+
+        <label class="checkbox-row" for="filaman-enabled">
+          <input id="filaman-enabled" type="checkbox">
+          <span data-i18n="enableFilaman">Enable FilaMan location selection after scanning</span>
+        </label>
+
+        <div class="button-row">
+          <button id="filaman-save" type="button" data-i18n="saveFilaman">Save FilaMan settings</button>
+          <button id="filaman-test" class="secondary" type="button" data-i18n="testConnection">Test connection</button>
+        </div>
+        <p id="filaman-status" class="status">FilaMan status unavailable.</p>
       </section>
     </main>
 
@@ -43,14 +102,66 @@
 
       await init();
 
+      const translations = {
+        en: {
+          subtitle: 'Wi-Fi, Bambu catalog, FilaMan, and live diagnostics', deviceLog: 'Device log', setupKey: 'Setup key', unlock: 'Unlock',
+          language: 'Language', displayLanguage: 'Display and web interface', saveLanguage: 'Save language', wifiNetwork: 'Wi-Fi network (SSID)',
+          wifiPassword: 'Wi-Fi password', saveRestart: 'Save and restart', catalog: 'Bambu filament catalog',
+          catalogDescription: 'The catalog is downloaded directly from BambuStudio and cached on the SD card.', catalogUrl: 'Catalog JSON URL',
+          autoUpdate: 'Update automatically every 24 hours', saveCatalog: 'Save catalog settings', updateNow: 'Update now',
+          filamanIntegration: 'FilaMan integration',
+          filamanDescription: "Choose a regular FilaMan storage location before adding a new spool, or press an existing spool's location button to move it. Bambu AMS locations are excluded. The Tray UID is used as external_id; the NFC Tag UID is never transmitted.",
+          filamanUrl: 'FilaMan URL', httpHelp: 'HTTP is supported for trusted local networks but sends the device token and spool data without transport encryption.',
+          deviceToken: 'Device access token', tokenHelp: 'The FilaScan integration plugin must be installed in FilaMan and authorize this registered device. General inventory scopes are not required.',
+          caCertificate: 'TLS CA certificate (PEM, HTTPS only)', caHelp: 'Optional for HTTP. For HTTPS, use the CA certificate that issued the certificate for your FilaMan hostname.',
+          enableFilaman: 'Enable FilaMan location selection after scanning', saveFilaman: 'Save FilaMan settings', testConnection: 'Test connection',
+        },
+        de: {
+          subtitle: 'WLAN, Bambu-Katalog, FilaMan und Live-Diagnose', deviceLog: 'Geräteprotokoll', setupKey: 'Einrichtungsschlüssel', unlock: 'Entsperren',
+          language: 'Sprache', displayLanguage: 'Display und Weboberfläche', saveLanguage: 'Sprache speichern', wifiNetwork: 'WLAN-Netzwerk (SSID)',
+          wifiPassword: 'WLAN-Passwort', saveRestart: 'Speichern und neu starten', catalog: 'Bambu-Filamentkatalog',
+          catalogDescription: 'Der Katalog wird direkt aus BambuStudio geladen und auf der SD-Karte zwischengespeichert.', catalogUrl: 'Katalog-JSON-URL',
+          autoUpdate: 'Alle 24 Stunden automatisch aktualisieren', saveCatalog: 'Katalogeinstellungen speichern', updateNow: 'Jetzt aktualisieren',
+          filamanIntegration: 'FilaMan-Integration',
+          filamanDescription: 'Wähle vor dem Hinzufügen einer neuen Spule einen regulären FilaMan-Lagerort oder verschiebe eine vorhandene Spule über ihren Standort-Button. Bambu-AMS-Standorte werden ausgeschlossen. Die Tray UID wird als external_id verwendet; die NFC Tag UID wird nie übertragen.',
+          filamanUrl: 'FilaMan-URL', httpHelp: 'HTTP wird für vertrauenswürdige lokale Netzwerke unterstützt, überträgt Geräte-Token und Spulendaten jedoch unverschlüsselt.',
+          deviceToken: 'Gerätezugriffstoken', tokenHelp: 'Das FilaScan-Integrationsplugin muss in FilaMan installiert sein und dieses registrierte Gerät autorisieren. Allgemeine Bestandsberechtigungen sind nicht erforderlich.',
+          caCertificate: 'TLS-CA-Zertifikat (PEM, nur HTTPS)', caHelp: 'Für HTTP optional. Verwende für HTTPS das CA-Zertifikat, das das Zertifikat des FilaMan-Hostnamens ausgestellt hat.',
+          enableFilaman: 'FilaMan-Standortauswahl nach dem Scannen aktivieren', saveFilaman: 'FilaMan-Einstellungen speichern', testConnection: 'Verbindung testen',
+        },
+      };
+      let currentLanguage = 'en';
+      function applyLanguage(language) {
+        currentLanguage = translations[language] ? language : 'en';
+        document.documentElement.lang = currentLanguage;
+        document.querySelectorAll('[data-i18n]').forEach((element) => {
+          const value = translations[currentLanguage][element.dataset.i18n];
+          if (value) element.textContent = value;
+        });
+      }
+      const tr = (english, german) => currentLanguage === 'de' ? german : english;
+
       const keyInput = document.querySelector('#security-key');
       const keyStatus = document.querySelector('#key-status');
       const wifiSection = document.querySelector('#wifi');
+      const languageSection = document.querySelector('#language');
+      const catalogSection = document.querySelector('#catalog');
+      const filamanSection = document.querySelector('#filaman');
       const ssidInput = document.querySelector('#ssid');
       const passwordInput = document.querySelector('#password');
       const saveStatus = document.querySelector('#save-status');
+      const languageInput = document.querySelector('#display-language');
+      const languageStatus = document.querySelector('#language-status');
       const logOutput = document.querySelector('#log-output');
       const logStatus = document.querySelector('#log-status');
+      const catalogUrlInput = document.querySelector('#catalog-url');
+      const catalogAutoUpdateInput = document.querySelector('#catalog-auto-update');
+      const catalogStatus = document.querySelector('#catalog-status');
+      const filamanUrlInput = document.querySelector('#filaman-url');
+      const filamanTokenInput = document.querySelector('#filaman-token');
+      const filamanCaInput = document.querySelector('#filaman-ca');
+      const filamanEnabledInput = document.querySelector('#filaman-enabled');
+      const filamanStatus = document.querySelector('#filaman-status');
       let encryptionKey;
       let lastLogText = '';
 
@@ -61,14 +172,14 @@
           const text = await response.text();
           const followTail = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 36;
           if (text !== lastLogText) {
-            logOutput.textContent = text || 'No diagnostic events recorded yet.';
+            logOutput.textContent = text || tr('No diagnostic events recorded yet.', 'Noch keine Diagnoseereignisse aufgezeichnet.');
             lastLogText = text;
             if (followTail) logOutput.scrollTop = logOutput.scrollHeight;
           }
           logStatus.textContent = 'Live';
           logStatus.classList.remove('offline');
         } catch (error) {
-          logStatus.textContent = `Disconnected: ${error.message}`;
+          logStatus.textContent = `${tr('Disconnected', 'Getrennt')}: ${error.message}`;
           logStatus.classList.add('offline');
         }
       }
@@ -92,34 +203,181 @@
         return JSON.parse(decrypt(encryptionKey, await response.text()));
       }
 
+      async function readCatalog() {
+        const response = await fetch('/api/catalog-config', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        return JSON.parse(decrypt(encryptionKey, await response.text()));
+      }
+
+      async function readLanguage() {
+        const response = await fetch('/api/language-config', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        return JSON.parse(decrypt(encryptionKey, await response.text()));
+      }
+
+      async function readFilaMan() {
+        const response = await fetch('/api/filaman-config', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        return JSON.parse(decrypt(encryptionKey, await response.text()));
+      }
+
+      function renderFilaManStatus(config) {
+        filamanStatus.textContent = `${config.busy ? tr('Working', 'In Arbeit') : config.state} · ${config.enabled ? tr('location selection enabled', 'Standortauswahl aktiviert') : tr('location selection disabled', 'Standortauswahl deaktiviert')}`;
+      }
+
+      async function refreshFilaManStatus() {
+        if (!encryptionKey || filamanSection.hidden) return;
+        try {
+          renderFilaManStatus(await readFilaMan());
+        } catch (error) {
+          filamanStatus.textContent = `${tr('Could not read FilaMan status', 'FilaMan-Status konnte nicht gelesen werden')}: ${error.message}`;
+        }
+      }
+
+      function renderCatalogStatus(catalog) {
+        const source = catalog.source ? ` · ${catalog.source}` : '';
+        const activity = catalog.updating ? tr('Updating', 'Wird aktualisiert') : catalog.state;
+        catalogStatus.textContent = `${activity} · ${catalog.entries} ${tr('entries', 'Einträge')}${source}`;
+      }
+
+      async function refreshCatalogStatus() {
+        if (!encryptionKey || catalogSection.hidden) return;
+        try {
+          renderCatalogStatus(await readCatalog());
+        } catch (error) {
+          catalogStatus.textContent = `${tr('Could not read catalog status', 'Katalogstatus konnte nicht gelesen werden')}: ${error.message}`;
+        }
+      }
+
       document.querySelector('#verify').addEventListener('click', async () => {
-        keyStatus.textContent = 'Checking key…';
+        keyStatus.textContent = tr('Checking key…', 'Schlüssel wird geprüft…');
+        languageSection.hidden = true;
         wifiSection.hidden = true;
+        catalogSection.hidden = true;
+        filamanSection.hidden = true;
         try {
           encryptionKey = derive_key(keyInput.value.trim(), 'example_salt');
           await send('/api/test-key', { test: 'FilaScan' });
           const wifi = await readWifi();
+          const language = await readLanguage();
+          const catalog = await readCatalog();
+          const filaman = await readFilaMan();
           ssidInput.value = wifi.ssid || '';
           passwordInput.value = wifi.password || '';
-          keyStatus.textContent = 'Setup key accepted.';
+          languageInput.value = language.language || 'en';
+          applyLanguage(languageInput.value);
+          catalogUrlInput.value = catalog.url || '';
+          catalogAutoUpdateInput.checked = catalog.auto_update !== false;
+          renderCatalogStatus(catalog);
+          filamanUrlInput.value = filaman.base_url || '';
+          filamanTokenInput.value = filaman.device_token || '';
+          filamanCaInput.value = filaman.ca_certificate_pem || '';
+          filamanEnabledInput.checked = filaman.enabled === true;
+          renderFilaManStatus(filaman);
+          keyStatus.textContent = tr('Setup key accepted.', 'Einrichtungsschlüssel akzeptiert.');
+          languageSection.hidden = false;
           wifiSection.hidden = false;
+          catalogSection.hidden = false;
+          filamanSection.hidden = false;
         } catch (error) {
-          keyStatus.textContent = `Could not unlock setup: ${error.message}`;
+          keyStatus.textContent = `${tr('Could not unlock setup', 'Einrichtung konnte nicht entsperrt werden')}: ${error.message}`;
+        }
+      });
+
+      document.querySelector('#language-save').addEventListener('click', async () => {
+        languageStatus.textContent = tr('Saving language…', 'Sprache wird gespeichert…');
+        try {
+          const response = await send('/api/language-config', { language: languageInput.value });
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          applyLanguage(languageInput.value);
+          languageStatus.textContent = tr('Language saved. New scans use this language.', 'Sprache gespeichert. Neue Scans verwenden diese Sprache.');
+        } catch (error) {
+          languageStatus.textContent = `${tr('Could not save language', 'Sprache konnte nicht gespeichert werden')}: ${error.message}`;
+        }
+      });
+
+      document.querySelector('#catalog-save').addEventListener('click', async () => {
+        catalogStatus.textContent = tr('Saving catalog settings…', 'Katalogeinstellungen werden gespeichert…');
+        try {
+          const response = await send('/api/catalog-config', {
+            url: catalogUrlInput.value.trim(),
+            auto_update: catalogAutoUpdateInput.checked,
+          });
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          catalogStatus.textContent = tr('Catalog settings saved.', 'Katalogeinstellungen gespeichert.');
+          setTimeout(refreshCatalogStatus, 500);
+        } catch (error) {
+          catalogStatus.textContent = `${tr('Could not save catalog settings', 'Katalogeinstellungen konnten nicht gespeichert werden')}: ${error.message}`;
+        }
+      });
+
+      document.querySelector('#catalog-update').addEventListener('click', async () => {
+        catalogStatus.textContent = tr('Starting catalog update…', 'Katalogaktualisierung wird gestartet…');
+        try {
+          const response = await send('/api/catalog-update', {});
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          await refreshCatalogStatus();
+        } catch (error) {
+          catalogStatus.textContent = `${tr('Could not start catalog update', 'Katalogaktualisierung konnte nicht gestartet werden')}: ${error.message}`;
+        }
+      });
+
+      setInterval(refreshCatalogStatus, 2000);
+      setInterval(refreshFilaManStatus, 2000);
+
+      document.querySelector('#filaman-save').addEventListener('click', async () => {
+        filamanStatus.textContent = tr('Saving FilaMan settings…', 'FilaMan-Einstellungen werden gespeichert…');
+        try {
+          const response = await send('/api/filaman-config', {
+            enabled: filamanEnabledInput.checked,
+            base_url: filamanUrlInput.value.trim(),
+            device_token: filamanTokenInput.value.trim(),
+            ca_certificate_pem: filamanCaInput.value.trim(),
+          });
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          filamanStatus.textContent = tr('FilaMan settings saved.', 'FilaMan-Einstellungen gespeichert.');
+          setTimeout(refreshFilaManStatus, 500);
+        } catch (error) {
+          filamanStatus.textContent = `${tr('Could not save FilaMan settings', 'FilaMan-Einstellungen konnten nicht gespeichert werden')}: ${error.message}`;
+        }
+      });
+
+      document.querySelector('#filaman-test').addEventListener('click', async () => {
+        filamanStatus.textContent = tr('Saving settings and testing FilaMan connection…', 'Einstellungen werden gespeichert und die FilaMan-Verbindung wird getestet…');
+        try {
+          const saveResponse = await send('/api/filaman-config', {
+            enabled: filamanEnabledInput.checked,
+            base_url: filamanUrlInput.value.trim(),
+            device_token: filamanTokenInput.value.trim(),
+            ca_certificate_pem: filamanCaInput.value.trim(),
+          });
+          const saveResult = JSON.parse(decrypt(encryptionKey, await saveResponse.text()));
+          if (saveResult.error_text) throw new Error(saveResult.error_text);
+          const response = await send('/api/filaman-test', {});
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          setTimeout(refreshFilaManStatus, 500);
+        } catch (error) {
+          filamanStatus.textContent = `${tr('Could not test FilaMan', 'FilaMan konnte nicht getestet werden')}: ${error.message}`;
         }
       });
 
       document.querySelector('#save').addEventListener('click', async () => {
-        saveStatus.textContent = 'Saving Wi-Fi settings…';
+        saveStatus.textContent = tr('Saving Wi-Fi settings…', 'WLAN-Einstellungen werden gespeichert…');
         try {
           const response = await send('/api/wifi-config', {
             ssid: ssidInput.value.trim(),
             password: passwordInput.value,
           });
           JSON.parse(decrypt(encryptionKey, await response.text()));
-          saveStatus.textContent = 'Saved. FilaScan is restarting…';
+          saveStatus.textContent = tr('Saved. FilaScan is restarting…', 'Gespeichert. FilaScan wird neu gestartet…');
           await send('/api/reset-device', {});
         } catch (error) {
-          saveStatus.textContent = `Could not save Wi-Fi settings: ${error.message}`;
+          saveStatus.textContent = `${tr('Could not save Wi-Fi settings', 'WLAN-Einstellungen konnten nicht gespeichert werden')}: ${error.message}`;
         }
       });
 

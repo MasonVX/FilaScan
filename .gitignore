@@ -1,6 +1,7 @@
 # Rust build output
 core/target/
 shared/target/
+.DS_Store
 
 # Generated firmware binaries (built by CI, not committed)
 build/*.bin

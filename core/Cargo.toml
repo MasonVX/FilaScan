@@ -1,6 +1,6 @@
 [package]
 name = "FilaScan"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license-file = "../LICENSE.md"
 homepage = "https://github.com/MasonVX/FilaScan"
@@ -52,9 +52,17 @@ embedded-hal-bus = { version = "0.3.0", features = ["async"] }
 mipidsi = "0.8.0"
 slint = { version = "=1.11.0", default-features = false, features = ["libm", "unsafe-single-threaded", "compat-1-2", "renderer-software"] }
 picoserve = { version = "0.15.1", features = ["alloc", "embassy"] }
+edge-http = "0.6.1"
+edge-nal = "0.5.0"
+edge-nal-embassy = "0.7.0"
+embedded-io-async = "0.6.1"
+zune-core = { version = "0.4.12", default-features = false }
+zune-jpeg = { version = "0.4.21", default-features = false }
 
 static_cell = { version = "2.1", features = ["nightly"] }
 log = "0.4.22"
 hashbrown = "0.16.1"
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 shared = { package = "filascan-reader", path = "../shared" }

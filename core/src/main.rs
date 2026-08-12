@@ -7,7 +7,11 @@
 
 mod app;
 mod bambu_spool;
+mod catalog;
 mod diagnostics;
+mod filaman;
+mod image_loader;
+mod localization;
 mod settings;
 mod web_app;
 
@@ -171,13 +175,32 @@ async fn main(spawner: Spawner) {
     let orientation = mipidsi::options::Orientation::new()
         .rotate(mipidsi::options::Rotation::Deg270)
         .flip_horizontal();
-    let (display, display_runner, _unused_sdcard) = WT32SC01Plus::new(display_peripherals, sdcard_peripherals, orientation, framework.clone());
+    let (display, display_runner, sdcard_device) = WT32SC01Plus::new(display_peripherals, sdcard_peripherals, orientation, framework.clone());
     spawner.spawn(display_task(display_runner)).ok();
     display.wait_init_done().await.ok();
+    Framework::set_sdcard_device(framework.clone(), sdcard_device).await;
+    let file_store = framework.borrow().file_store();
+    let sdcard_available = file_store.lock().await.card_installed;
+    if sdcard_available {
+        info!("SD card initialized for the product image cache");
+    } else {
+        info!("No SD card available; product images will not be cached");
+    }
 
     let ui = mk_static!(app::AppWindow, app::create_slint_app());
     let diagnostics = Rc::new(RefCell::new(diagnostics::LogBuffer::new()));
     diagnostics.borrow_mut().info("FilaScan diagnostics started");
+    if sdcard_available {
+        diagnostics.borrow_mut().info("SD card product image cache available");
+    } else {
+        diagnostics.borrow_mut().info("No SD card product image cache available");
+    }
+    let catalog_service = catalog::CatalogService::new(framework.clone(), diagnostics.clone(), sdcard_available);
+    catalog_service.load_from_sd().await;
+    let filaman_service = filaman::FilaManService::new(framework.clone(), diagnostics.clone(), sdcard_available);
+    filaman_service.load_from_sd().await;
+    let localization_service = localization::LocalizationService::new(framework.clone(), diagnostics.clone(), sdcard_available);
+    localization_service.load_from_sd().await;
 
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(64);
     let spi_rx = esp_hal::dma::DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
@@ -204,10 +227,23 @@ async fn main(spawner: Spawner) {
         embassy_time::Delay,
     )
     .unwrap();
-    let _reader_controller = app::init_app(ui.as_weak(), framework.clone(), diagnostics.clone(), pn532_spi, pn532_irq);
+    let _reader_controller = app::init_app(
+        ui.as_weak(),
+        framework.clone(),
+        diagnostics.clone(),
+        catalog_service.catalog(),
+        filaman_service.clone(),
+        localization_service.clone(),
+        pn532_spi,
+        pn532_irq,
+    );
 
     let web_state_data = web_app::FilaScanWebState {
         diagnostics: diagnostics.clone(),
+        catalog: catalog_service.clone(),
+        filaman: filaman_service.clone(),
+        localization: localization_service.clone(),
+        ui: ui.as_weak(),
     };
     let web_builder = framework::framework_web_app::WebAppBuilder::<web_app::FilaScanWebState, WifiAppBuilder> {
         framework: framework.clone(),
@@ -260,6 +296,9 @@ async fn main(spawner: Spawner) {
     framework.borrow().notify_initialization_completed(true);
     Framework::wait_for_wifi(&framework).await;
     framework.borrow_mut().start_web_app(sta_stack, framework::framework::WebConfigMode::STA);
+    if let Err(error) = catalog_service.start_periodic_updates() {
+        diagnostics.borrow_mut().warn(&error);
+    }
 
     loop {
         Timer::after_secs(60).await;

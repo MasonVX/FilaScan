@@ -1,4 +1,10 @@
+export struct LocationChoice {
+    id: int,
+    name: string,
+}
+
 export global ReaderState {
+    in-out property <bool> german: false;
     in-out property <bool> reader-available: false;
     in-out property <bool> reading: false;
     in-out property <bool> has-spool: false;
@@ -12,12 +18,28 @@ export global ReaderState {
     in-out property <color> primary-color: #333b45;
     in-out property <color> secondary-color: #333b45;
     in-out property <bool> has-secondary-color: false;
+    in-out property <image> spool-image;
+    in-out property <bool> has-spool-image: false;
+    in-out property <bool> spool-image-loading: false;
 
     in-out property <string> physical-parameters: "";
     in-out property <string> temperature-parameters: "";
     in-out property <string> drying-parameters: "";
     in-out property <string> production-parameters: "";
     in-out property <string> identifier-parameters: "";
+
+    in-out property <bool> choosing-location: false;
+    in-out property <bool> moving-existing-spool: false;
+    in-out property <bool> confirming-archive: false;
+    in-out property <bool> filaman-busy: false;
+    in-out property <string> location-prompt: "";
+    in-out property <[LocationChoice]> locations: [];
+    in-out property <bool> has-location-action: false;
+    in-out property <string> current-location-label: "";
+    callback location-selected(int);
+    callback cancel-import();
+    callback manage-location();
+    callback archive-spool();
 
     in-out property <bool> wifi-setup-active: false;
     in-out property <string> wifi-url: "";

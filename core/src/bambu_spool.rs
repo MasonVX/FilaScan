@@ -5,13 +5,15 @@ use alloc::{
 };
 use hashbrown::HashMap;
 
+use crate::{catalog::Catalog, localization::Language};
+
 const MATERIAL_NAMES: &str = include_str!("../data/base-filaments-index.csv");
 const COLOR_NAMES: &str = include_str!("../data/bambu-color-names.csv");
 
 #[derive(Debug, Clone)]
 pub struct BambuSpool {
     pub tag_uid: String,
-    pub spool_uid: String,
+    pub tray_uid: String,
     pub material_id: String,
     pub variant_id: String,
     pub filament_type: String,
@@ -21,6 +23,7 @@ pub struct BambuSpool {
     pub secondary_rgba: Option<[u8; 4]>,
     pub color_hex: String,
     pub color_name: String,
+    pub display_color_name: String,
     pub bambu_color_code: String,
     pub weight_g: u16,
     pub diameter_mm: f64,
@@ -35,7 +38,7 @@ pub struct BambuSpool {
 }
 
 impl BambuSpool {
-    pub fn from_tag(tag_uid: &[u8], blocks: &HashMap<i32, Vec<u8>>) -> Self {
+    pub fn from_tag(tag_uid: &[u8], blocks: &HashMap<i32, Vec<u8>>, catalog: &Catalog, language: Language) -> Self {
         let material_id = block_string(blocks, 1, 8, 8);
         let variant_id = block_string(blocks, 1, 0, 8);
         let filament_type = block_string(blocks, 2, 0, 16);
@@ -55,10 +58,34 @@ impl BambuSpool {
             None => primary_hex.clone(),
         };
 
-        let (color_name, bambu_color_code) =
-            lookup_color(&material_id, &combined_colors).unwrap_or_else(|| ("Unknown Bambu color".to_string(), String::new()));
+        let catalog_match = catalog.lookup(&material_id, &variant_id, &combined_colors);
+        let (color_name, display_color_name, bambu_color_code) = catalog_match
+            .as_ref()
+            .map(|entry| {
+                (
+                    entry.color_name(Language::English),
+                    entry.color_name(language),
+                    entry.product_code.clone(),
+                )
+            })
+            .or_else(|| lookup_color(&material_id, &combined_colors).map(|(name, code)| (name.clone(), name, code)))
+            .unwrap_or_else(|| {
+                (
+                    "Unknown Bambu color".to_string(),
+                    if language == Language::German {
+                        "Unbekannte Bambu-Farbe"
+                    } else {
+                        "Unknown Bambu color"
+                    }
+                    .to_string(),
+                    String::new(),
+                )
+            });
 
-        let official_material_name = lookup_material(&material_id).unwrap_or_else(|| detailed_filament_type.clone());
+        let official_material_name = catalog_match
+            .map(|entry| entry.filament_type)
+            .or_else(|| lookup_material(&material_id))
+            .unwrap_or_else(|| detailed_filament_type.clone());
 
         let production_date = {
             let full = block_string(blocks, 12, 0, 16);
@@ -67,7 +94,7 @@ impl BambuSpool {
 
         Self {
             tag_uid: hex::encode_upper(tag_uid),
-            spool_uid: block_string(blocks, 9, 0, 16),
+            tray_uid: block_hex(blocks, 9),
             material_id,
             variant_id,
             filament_type,
@@ -77,6 +104,7 @@ impl BambuSpool {
             secondary_rgba,
             color_hex: combined_colors,
             color_name,
+            display_color_name,
             bambu_color_code,
             weight_g: block_u16(blocks, 5, 4),
             diameter_mm: block_f64(blocks, 5, 8),
@@ -121,6 +149,10 @@ fn block_string(blocks: &HashMap<i32, Vec<u8>>, block: i32, start: usize, len: u
         .unwrap_or_default()
         .trim()
         .to_string()
+}
+
+fn block_hex(blocks: &HashMap<i32, Vec<u8>>, block: i32) -> String {
+    blocks.get(&block).map(hex::encode_upper).unwrap_or_default()
 }
 
 fn block_array<const N: usize>(blocks: &HashMap<i32, Vec<u8>>, block: i32, start: usize) -> Option<[u8; N]> {
