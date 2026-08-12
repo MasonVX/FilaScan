@@ -4,13 +4,17 @@ version = 4
 
 [[package]]
 name = "FilaScan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "edge-http",
+ "edge-nal",
+ "edge-nal-embassy",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-net",
  "embassy-time",
  "embedded-hal-bus",
+ "embedded-io-async 0.6.1",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -28,9 +32,13 @@ dependencies = [
  "log",
  "mipidsi",
  "picoserve",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "static_cell",
+ "zune-core 0.4.12",
+ "zune-jpeg 0.4.21",
 ]
 
 [[package]]

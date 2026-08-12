@@ -40,7 +40,7 @@ component IdleView inherits Rectangle {
             VerticalLayout {
                 padding: 8px;
                 spacing: 2px;
-                Text { color: #a9b8c7; font-size: 13px; text: "Wi-Fi setup"; }
+                Text { color: #a9b8c7; font-size: 13px; text: ReaderState.german ? "WLAN-Einrichtung" : "Wi-Fi setup"; }
                 Text { color: white; font-size: 15px; text: ReaderState.wifi-url; }
                 Text { color: white; font-size: 15px; text: "SSID: " + ReaderState.wifi-ssid + "   Key: " + ReaderState.wifi-key; }
             }
@@ -56,36 +56,76 @@ component SpoolView inherits Rectangle {
         spacing: 8px;
 
         HorizontalLayout {
-            height: 230px;
+            height: ReaderState.has-location-action ? 190px : 230px;
             spacing: 12px;
 
             Rectangle {
                 width: 158px;
-                background: ReaderState.primary-color;
-                border-width: 2px;
-                border-color: #d7e2ec;
-                border-radius: 10px;
+                background: transparent;
 
-                if ReaderState.has-secondary-color: Rectangle {
-                    y: parent.height / 2;
-                    height: parent.height / 2;
-                    background: ReaderState.secondary-color;
-                    border-radius: 8px;
-                }
+                VerticalLayout {
+                    spacing: 8px;
 
-                Rectangle {
-                    x: 8px;
-                    y: parent.height - 34px;
-                    width: parent.width - 16px;
-                    height: 26px;
-                    background: #dd10151d;
-                    border-radius: 5px;
-                    Text {
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        color: white;
-                        font-size: 13px;
-                        text: ReaderState.color-code;
+                    Rectangle {
+                        height: 150px;
+                        background: #1d2733;
+                        border-width: 1px;
+                        border-color: #344250;
+                        border-radius: 10px;
+
+                        if ReaderState.has-spool-image: Image {
+                            x: 6px;
+                            y: 6px;
+                            width: parent.width - 12px;
+                            height: parent.height - 12px;
+                            source: ReaderState.spool-image;
+                            image-fit: contain;
+                        }
+
+                        if !ReaderState.has-spool-image: Text {
+                            x: 8px;
+                            y: 8px;
+                            width: parent.width - 16px;
+                            height: parent.height - 16px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                            color: #8797a8;
+                            font-size: 12px;
+                            text: ReaderState.spool-image-loading
+                                ? (ReaderState.german ? "Bambu-Produktbild wird geladen…" : "Loading Bambu product image…")
+                                : (ReaderState.german ? "Produktbild nicht verfügbar" : "Product image unavailable");
+                        }
+                    }
+
+                    Rectangle {
+                        background: ReaderState.primary-color;
+                        border-width: 2px;
+                        border-color: #d7e2ec;
+                        border-radius: 10px;
+
+                        if ReaderState.has-secondary-color: Rectangle {
+                            y: parent.height / 2;
+                            height: parent.height / 2;
+                            background: ReaderState.secondary-color;
+                            border-radius: 8px;
+                        }
+
+                        Rectangle {
+                            x: 8px;
+                            y: parent.height - 34px;
+                            width: parent.width - 16px;
+                            height: 26px;
+                            background: #dd10151d;
+                            border-radius: 5px;
+                            Text {
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                color: white;
+                                font-size: 13px;
+                                text: ReaderState.color-code;
+                            }
+                        }
                     }
                 }
             }
@@ -105,7 +145,9 @@ component SpoolView inherits Rectangle {
                 Text {
                     color: #a9b8c7;
                     font-size: 14px;
-                    text: ReaderState.bambu-color-code == "" ? "Bambu color code unavailable" : "Bambu color " + ReaderState.bambu-color-code;
+                    text: ReaderState.bambu-color-code == ""
+                        ? (ReaderState.german ? "Bambu-Farbcode nicht verfügbar" : "Bambu color code unavailable")
+                        : (ReaderState.german ? "Bambu-Farbe " : "Bambu color ") + ReaderState.bambu-color-code;
                 }
 
                 Rectangle { height: 1px; background: #344250; }
@@ -123,11 +165,187 @@ component SpoolView inherits Rectangle {
             overflow: elide;
             text: ReaderState.identifier-parameters;
         }
+        if ReaderState.has-location-action: Rectangle {
+            height: 38px;
+            background: location-touch.pressed ? #32749a : #24506a;
+            border-width: 1px;
+            border-color: #72d6ff;
+            border-radius: 8px;
+
+            Text {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+                color: white;
+                font-size: 15px;
+                font-weight: 600;
+                text: ReaderState.current-location-label;
+            }
+
+            location-touch := TouchArea {
+                clicked => { ReaderState.manage-location(); }
+            }
+        }
         Text {
             horizontal-alignment: center;
             color: ReaderState.reading ? #f4c542 : #72d6ff;
             font-size: 14px;
-            text: ReaderState.reading ? "Reading tag…" : "Ready for the next Bambu spool";
+            overflow: elide;
+            text: ReaderState.reading ? (ReaderState.german ? "Tag wird gelesen…" : "Reading tag…") : ReaderState.status-text;
+        }
+    }
+}
+
+component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <color> normal-color: #24506a;
+    callback clicked();
+
+    height: 40px;
+    background: !root.enabled ? #2b3540 : touch.pressed ? #32749a : root.normal-color;
+    border-width: 1px;
+    border-color: root.enabled ? #72d6ff : #52606d;
+    border-radius: 8px;
+
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+        color: root.enabled ? white : #8797a8;
+        font-size: 17px;
+        font-weight: 600;
+        text: root.label;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            if root.enabled {
+                root.clicked();
+            }
+        }
+    }
+}
+
+component LocationSelectionView inherits Rectangle {
+    background: #10151d;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+
+        Text {
+            height: 28px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: #72d6ff;
+            font-size: 22px;
+            font-weight: 700;
+            text: ReaderState.confirming-archive
+                ? (ReaderState.german ? "Spule archivieren?" : "Archive spool?")
+                : ReaderState.moving-existing-spool
+                    ? (ReaderState.german ? "Spule verwalten" : "Manage spool")
+                    : (ReaderState.german ? "Spule zu FilaMan hinzufügen" : "Add spool to FilaMan");
+        }
+
+        Text {
+            height: 22px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            text: ReaderState.material-name + " · " + ReaderState.color-name;
+        }
+
+        Text {
+            height: 30px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            color: ReaderState.filaman-busy ? #f4c542 : #a9b8c7;
+            font-size: 14px;
+            text: ReaderState.location-prompt;
+        }
+
+        if !ReaderState.confirming-archive: Flickable {
+            height: ReaderState.moving-existing-spool ? 104px : 150px;
+            viewport-height: location-layout.preferred-height;
+
+            location-layout := VerticalLayout {
+                width: parent.width;
+                spacing: 6px;
+
+                for location in ReaderState.locations: ActionButton {
+                    label: location.name;
+                    enabled: !ReaderState.filaman-busy;
+                    clicked => { ReaderState.location-selected(location.id); }
+                }
+
+                if ReaderState.locations.length == 0: Text {
+                    height: 52px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    color: #8797a8;
+                    font-size: 15px;
+                    text: ReaderState.german
+                        ? "Lege zuerst einen regulären Lagerort in FilaMan an."
+                        : "Create a regular storage location in FilaMan first.";
+                }
+            }
+        }
+
+        if ReaderState.confirming-archive: Rectangle {
+            height: 104px;
+            background: #2c2024;
+            border-width: 1px;
+            border-color: #d16a76;
+            border-radius: 8px;
+
+            Text {
+                x: 10px;
+                y: 8px;
+                width: parent.width - 20px;
+                height: parent.height - 16px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                color: white;
+                font-size: 15px;
+                text: ReaderState.german
+                    ? "Die Spule wird in FilaMan archiviert. Verbundene Integrationen können sie anschließend aus ihrem aktiven Bestand entfernen."
+                    : "The spool will be archived in FilaMan. Connected integrations can then remove it from their active inventory.";
+            }
+        }
+
+        if ReaderState.moving-existing-spool: ActionButton {
+            label: ReaderState.filaman-busy
+                ? (ReaderState.german ? "Bitte warten…" : "Please wait…")
+                : ReaderState.confirming-archive
+                    ? (ReaderState.german ? "Archivieren bestätigen" : "Confirm archive")
+                    : (ReaderState.german ? "Spule archivieren" : "Archive spool");
+            enabled: !ReaderState.filaman-busy;
+            normal-color: #7a2934;
+            clicked => { ReaderState.archive-spool(); }
+        }
+
+        ActionButton {
+            label: ReaderState.filaman-busy
+                ? (ReaderState.german ? "Bitte warten…" : "Please wait…")
+                : ReaderState.confirming-archive
+                    ? (ReaderState.german ? "Zurück" : "Back")
+                    : (ReaderState.german ? "Abbrechen" : "Cancel");
+            enabled: !ReaderState.filaman-busy;
+            normal-color: #54343a;
+            clicked => { ReaderState.cancel-import(); }
         }
     }
 }
@@ -136,6 +354,7 @@ export component AppWindow inherits Window {
     width: 480px;
     height: 320px;
 
-    if ReaderState.has-spool: SpoolView { }
-    if !ReaderState.has-spool: IdleView { }
+    if ReaderState.choosing-location: LocationSelectionView { }
+    if ReaderState.has-spool && !ReaderState.choosing-location: SpoolView { }
+    if !ReaderState.has-spool && !ReaderState.choosing-location: IdleView { }
 }

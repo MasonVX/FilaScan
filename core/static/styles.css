@@ -80,6 +80,8 @@ label {
 }
 
 input,
+textarea,
+select,
 button {
   box-sizing: border-box;
   width: 100%;
@@ -88,11 +90,63 @@ button {
   font: inherit;
 }
 
-input {
+.section-description {
+  margin: 8px 0 14px;
+  color: #a9b8c7;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+
+.checkbox-row input {
+  width: 20px;
+  min-height: 20px;
+  margin: 0;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+button.secondary {
+  border: 1px solid #526274;
+  background: #263544;
+}
+
+button.secondary:hover {
+  background: #34495c;
+}
+
+input,
+select {
   padding: 8px 12px;
   border: 1px solid #526274;
   background: #0f151c;
   color: white;
+}
+
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #526274;
+  border-radius: 8px;
+  background: #0f151c;
+  color: white;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  resize: vertical;
+}
+
+.field-help {
+  margin: 6px 0 0;
+  color: #8fa1b2;
+  font-size: 0.85rem;
 }
 
 button {
@@ -111,4 +165,11 @@ button:hover {
 .status {
   min-height: 1.4em;
   color: #a9b8c7;
+}
+
+@media (max-width: 560px) {
+  .button-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
 }

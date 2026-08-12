@@ -3,6 +3,7 @@ name: Build FilaScan firmware
 on:
   push:
     branches: [main]
+    tags: ['filascan-v*']
     paths:
       - core/**
       - shared/**
@@ -40,6 +41,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/filascan-v')
+        working-directory: core
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          test "$GITHUB_REF_NAME" = "filascan-v$version"
+          test -f "../.github/releases/$GITHUB_REF_NAME.md"
 
       - name: Restore ESP toolchain cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -115,7 +125,10 @@ jobs:
             target/xtensa-esp32s3-none-elf/release/FilaScan \
             ../dist/FilaScan-esp32s3.bin
 
-          sha256sum ../dist/FilaScan-esp32s3.bin > ../dist/FilaScan-esp32s3.bin.sha256
+          (
+            cd ../dist
+            sha256sum FilaScan-esp32s3.bin > FilaScan-esp32s3.bin.sha256
+          )
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           printf 'project=FilaScan\nfirmware_version=%s\ngit_commit=%s\ntarget=esp32s3\nflash_size=16mb\n' \
             "$version" "$GITHUB_SHA" > ../dist/build-info.txt
@@ -127,3 +140,35 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: Publish tagged firmware
+    if: startsWith(github.ref, 'refs/tags/filascan-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: FilaScan-esp32s3-${{ github.sha }}
+          path: dist
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#filascan-v}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "FilaScan $version" \
+            --notes-file ".github/releases/$GITHUB_REF_NAME.md"
