@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added the official FilaMan device heartbeat with local IPv4 reporting so
+  FilaMan can display the registered device's online state and address.
+- Added the ESP32 reset reason to the startup diagnostic log for passive crash
+  diagnosis without a persistent USB or browser connection.
 - Added one-time FilaMan device-code registration to the protected web
   interface. FilaScan exchanges the six-character code for a permanent device
   token, validates it and stores it on the SD card without logging the code or

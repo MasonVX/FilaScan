@@ -135,6 +135,13 @@ The connection test calls `GET /api/v1/devices/filascan/status` and verifies
 that the plugin reports `ready` with `location_selection: true` and
 `location_management: true` and `spool_archiving: true`.
 
+While a device is registered, FilaScan sends the official FilaMan device
+heartbeat every 60 seconds. The heartbeat reports the local IPv4 address and
+updates the device's last-seen timestamp, allowing FilaMan to show its current
+online state and network address. Heartbeats are skipped while another FilaMan
+operation is active. FilaMan marks a device offline after three minutes without
+a heartbeat.
+
 For HTTPS, FilaScan validates the server certificate against the configured
 PEM CA before sending the token or spool data. Direct HTTP URLs are also
 supported for trusted local networks and do not require a CA certificate; the
@@ -227,6 +234,10 @@ downloaded catalog are stored on the SD card. Without an SD card, language
 changes apply only to the current session, and a catalog can still be
 downloaded into memory but cannot be retained across restarts. FilaMan
 integration settings cannot be saved without an SD card.
+
+The diagnostic log records the ESP32 reset reason at startup. This provides a
+passive indication of power, software and watchdog resets after a restart; it
+does not require a persistent USB or browser diagnostic connection.
 
 ## Building on macOS
 

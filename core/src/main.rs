@@ -68,6 +68,8 @@ async fn main(spawner: Spawner) {
     info!("FilaScan starting");
 
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    let reset_reason = esp_hal::system::reset_reason();
+    info!("Startup reset reason: {:?}", reset_reason);
 
     #[allow(static_mut_refs)]
     unsafe {
@@ -190,6 +192,9 @@ async fn main(spawner: Spawner) {
     let ui = mk_static!(app::AppWindow, app::create_slint_app());
     let diagnostics = Rc::new(RefCell::new(diagnostics::LogBuffer::new()));
     diagnostics.borrow_mut().info("FilaScan diagnostics started");
+    diagnostics
+        .borrow_mut()
+        .info(&alloc::format!("Startup reset reason: {reset_reason:?}"));
     if sdcard_available {
         diagnostics.borrow_mut().info("SD card product image cache available");
     } else {
@@ -199,6 +204,9 @@ async fn main(spawner: Spawner) {
     catalog_service.load_from_sd().await;
     let filaman_service = filaman::FilaManService::new(framework.clone(), diagnostics.clone(), sdcard_available);
     filaman_service.load_from_sd().await;
+    if let Err(error) = filaman_service.start_heartbeat() {
+        diagnostics.borrow_mut().warn(&error);
+    }
     let localization_service = localization::LocalizationService::new(framework.clone(), diagnostics.clone(), sdcard_available);
     localization_service.load_from_sd().await;
 

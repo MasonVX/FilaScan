@@ -15,6 +15,7 @@ use core::{
 use edge_http::{Method, io::client::Connection};
 use edge_nal_embassy::{Tcp, TcpBuffers};
 use embassy_net::IpAddress;
+use embassy_time::{Duration, Timer, with_timeout};
 use embedded_io_async::{Read, Write};
 use esp_mbedtls::{Certificates, TlsVersion, X509};
 use framework::{framework::Framework, utils::SpawnerHeapExt};
@@ -27,6 +28,9 @@ use crate::{bambu_spool::BambuSpool, diagnostics::LogBuffer};
 // component within the FAT 8.3 limits, including the three-character suffix.
 const SETTINGS_PATH: &str = "/filascan/filaman/settings.jsn";
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+const HEARTBEAT_INITIAL_DELAY: Duration = Duration::from_secs(15);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FilaManSettings {
@@ -105,6 +109,8 @@ pub struct FilaManService {
     state: RefCell<String>,
     device_name: RefCell<Option<String>>,
     busy: Cell<bool>,
+    heartbeat_succeeded: Cell<bool>,
+    heartbeat_failure_active: Cell<bool>,
     sdcard_available: bool,
 }
 
@@ -117,6 +123,8 @@ impl FilaManService {
             state: RefCell::new("Not configured".to_string()),
             device_name: RefCell::new(None),
             busy: Cell::new(false),
+            heartbeat_succeeded: Cell::new(false),
+            heartbeat_failure_active: Cell::new(false),
             sdcard_available,
         })
     }
@@ -160,6 +168,65 @@ impl FilaManService {
                 _ => self.log_warn("Ignoring invalid cached FilaMan settings"),
             }
         }
+    }
+
+    pub fn start_heartbeat(self: &Rc<Self>) -> Result<(), String> {
+        let service = self.clone();
+        let spawner = self.framework.borrow().spawner;
+        spawner
+            .spawn_heap(async move {
+                Timer::after(HEARTBEAT_INITIAL_DELAY).await;
+                loop {
+                    service.send_heartbeat_if_ready().await;
+                    Timer::after(HEARTBEAT_INTERVAL).await;
+                }
+            })
+            .map_err(|_| "Could not start FilaMan heartbeat task".to_string())
+    }
+
+    async fn send_heartbeat_if_ready(&self) {
+        let settings = self.settings.borrow().clone();
+        if settings.base_url.is_empty() || device_id_from_token(&settings.device_token).is_none() {
+            return;
+        }
+        let Some(ip_address) = self.local_ipv4_address() else {
+            return;
+        };
+        if self.busy.replace(true) {
+            return;
+        }
+
+        let result = with_timeout(
+            HEARTBEAT_TIMEOUT,
+            self.api_post("/devices/heartbeat", &json!({ "ip_address": ip_address })),
+        )
+        .await;
+        self.busy.set(false);
+
+        let error = match result {
+            Ok(Ok(response)) if response.get("status").and_then(Value::as_str) == Some("ok") => {
+                let recovered = self.heartbeat_failure_active.replace(false);
+                let first_success = !self.heartbeat_succeeded.replace(true);
+                if first_success {
+                    self.log_info(&format!("FilaMan heartbeat active; reporting local IP {ip_address}"));
+                } else if recovered {
+                    self.log_info(&format!("FilaMan heartbeat recovered; reporting local IP {ip_address}"));
+                }
+                return;
+            }
+            Ok(Ok(_)) => "FilaMan returned an invalid heartbeat response".to_string(),
+            Ok(Err(error)) => error,
+            Err(_) => "request timed out after 20 seconds".to_string(),
+        };
+
+        if !self.heartbeat_failure_active.replace(true) {
+            self.log_warn(&format!("FilaMan heartbeat failed: {error}"));
+        }
+    }
+
+    fn local_ipv4_address(&self) -> Option<String> {
+        let stack = self.framework.borrow().stack;
+        stack.config_v4().map(|config| config.address.address().to_string())
     }
 
     pub fn set_settings(self: &Rc<Self>, settings: FilaManSettings) -> Result<(), String> {
