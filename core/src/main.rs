@@ -14,6 +14,7 @@ mod image_loader;
 mod localization;
 mod settings;
 mod web_app;
+mod wifi;
 
 extern crate alloc;
 
@@ -292,7 +293,7 @@ async fn main(spawner: Spawner) {
 
     let (usb_rx, usb_tx) = esp_hal::usb_serial_jtag::UsbSerialJtag::new(peripherals.USB_DEVICE).into_async().split();
     spawner
-        .spawn_heap(framework::wifi::connection_task_inner(
+        .spawn_heap(wifi::connection_task_with_boot_fallback(
             wifi_controller,
             sta_stack,
             ap_stack,

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a boot-only Wi-Fi fallback that starts the setup access point after 60
+  seconds without a connection or IPv4 address while retaining stored
+  credentials. Later connection losses do not activate the fallback.
 - Added the official FilaMan device heartbeat with local IPv4 reporting so
   FilaMan can display the registered device's online state and address.
 - Added the ESP32 reset reason to the startup diagnostic log for passive crash

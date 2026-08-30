@@ -229,6 +229,13 @@ page, enter the Wi-Fi SSID and password, then select **Save and restart**.
 
 Wi-Fi credentials are stored in device flash. The configuration page remains
 available through the device's local network address after provisioning.
+When stored credentials are present but no Wi-Fi connection and IPv4 address
+can be established within 60 seconds after startup, FilaScan starts its setup
+access point at `http://192.168.2.1/config`. The stored credentials are retained.
+This fallback is evaluated only during startup. If a connection that was
+successfully established during startup is lost later, FilaScan retries that
+network without enabling the setup access point; restart the device to open a
+new 60-second fallback window.
 The selected language, catalog settings, FilaMan settings and the last valid
 downloaded catalog are stored on the SD card. Without an SD card, language
 changes apply only to the current session, and a catalog can still be
