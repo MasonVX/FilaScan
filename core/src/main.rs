@@ -205,14 +205,15 @@ async fn main(spawner: Spawner) {
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(64);
     let spi_rx = esp_hal::dma::DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let spi_tx = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
-    let pn532_irq = Input::new(peripherals.GPIO14, InputConfig::default().with_pull(Pull::None));
+    let reader_signal = Input::new(peripherals.GPIO14, InputConfig::default().with_pull(Pull::None));
+    let pn5180_reset = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
     let spi = Spi::new(
         peripherals.SPI2,
         esp_hal::spi::master::Config::default()
-            .with_frequency(Rate::from_khz(2000))
+            .with_frequency(Rate::from_khz(500))
             .with_mode(spi::Mode::_0)
-            .with_read_bit_order(spi::BitOrder::LsbFirst)
-            .with_write_bit_order(spi::BitOrder::LsbFirst),
+            .with_read_bit_order(spi::BitOrder::MsbFirst)
+            .with_write_bit_order(spi::BitOrder::MsbFirst),
     )
     .unwrap()
     .with_sck(peripherals.GPIO13)
@@ -221,7 +222,7 @@ async fn main(spawner: Spawner) {
     .with_dma(peripherals.DMA_CH1)
     .with_buffers(spi_rx, spi_tx)
     .into_async();
-    let pn532_spi = embedded_hal_bus::spi::ExclusiveDevice::new(
+    let reader_spi = embedded_hal_bus::spi::ExclusiveDevice::new(
         spi,
         Output::new(peripherals.GPIO10, Level::High, OutputConfig::default()),
         embassy_time::Delay,
@@ -234,8 +235,10 @@ async fn main(spawner: Spawner) {
         catalog_service.catalog(),
         filaman_service.clone(),
         localization_service.clone(),
-        pn532_spi,
-        pn532_irq,
+        reader_spi,
+        reader_signal,
+        pn5180_reset,
+        rfid_reader_mode(),
     );
 
     let web_state_data = web_app::FilaScanWebState {

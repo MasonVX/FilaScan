@@ -2672,6 +2672,8 @@ version = "0.1.0"
 dependencies = [
  "embassy-executor",
  "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "embedded-hal-bus",
  "esp-hal",
  "hashbrown 0.16.1",

@@ -11,7 +11,7 @@ use framework::framework::{Framework, FrameworkObserver, WebConfigMode};
 use framework::utils::SpawnerHeapExt;
 use hashbrown::HashMap;
 use log::{error, info, warn};
-use shared::bambu_reader::{BambuReader, BambuReaderObserver, ReaderEvent};
+use shared::bambu_reader::{BambuReader, BambuReaderObserver, ReaderEvent, ReaderKind};
 use slint::{Color, ComponentHandle, Image, ModelRc, SharedString, VecModel};
 
 use crate::{
@@ -53,9 +53,11 @@ pub fn init_app(
     filaman: Rc<FilaManService>,
     localization: Rc<LocalizationService>,
     spi_device: ExclusiveDevice<esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Async>, esp_hal::gpio::Output<'static>, embassy_time::Delay>,
-    irq: esp_hal::gpio::Input<'static>,
+    signal: esp_hal::gpio::Input<'static>,
+    reset: esp_hal::gpio::Output<'static>,
+    reader_mode: shared::bambu_reader::ReaderMode,
 ) -> Rc<RefCell<ReaderController>> {
-    let reader = shared::bambu_reader::init(spi_device, irq, framework.borrow().spawner);
+    let reader = shared::bambu_reader::init(spi_device, signal, reset, reader_mode, framework.borrow().spawner);
     let controller = Rc::new(RefCell::new(ReaderController {
         ui: ui.clone(),
         framework: framework.clone(),
@@ -736,12 +738,12 @@ impl ReaderController {
 }
 
 impl BambuReaderObserver for ReaderController {
-    fn on_reader_available(&mut self, available: bool) {
+    fn on_reader_available(&mut self, reader: Option<ReaderKind>) {
         let ui = self.ui.unwrap();
         let state = ui.global::<ReaderState>();
-        state.set_reader_available(available);
-        if available {
-            self.log_info("PN532 reader initialized and ready");
+        state.set_reader_available(reader.is_some());
+        if let Some(reader) = reader {
+            self.log_info(&format!("{} reader initialized and ready", reader.name()));
             state.set_status_text(
                 self.t(
                     "Hold a Bambu filament spool near the reader",
@@ -750,7 +752,7 @@ impl BambuReaderObserver for ReaderController {
                 .into(),
             );
         } else {
-            self.log_error("PN532 reader initialization failed");
+            self.log_error("RFID reader initialization failed");
             self.show_status(self.t("RFID reader unavailable", "RFID-Leser nicht verfügbar"));
         }
     }
@@ -777,7 +779,7 @@ impl BambuReaderObserver for ReaderController {
                 detail,
             } => {
                 self.log_warn(&format!(
-                    "Tag {}: {}; waiting for PN532 reacquisition, next attempt {}",
+                    "Tag {}: {}; waiting for reader reacquisition, next attempt {}",
                     hex::encode_upper(tag_uid),
                     detail,
                     next_attempt

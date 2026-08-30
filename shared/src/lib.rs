@@ -6,4 +6,7 @@ extern crate alloc;
 
 pub mod bambu_reader;
 pub mod nfc;
+pub mod pn5180;
+mod pn5180_reader;
+mod pn532_reader;
 pub mod pn532_ext;

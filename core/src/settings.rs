@@ -12,6 +12,14 @@ pub const WEB_APP_SECURITY_KEY_LENGTH: usize = 7;
 pub const WEB_APP_SALT: &str = "example_salt";
 pub const WEB_APP_KEY_DERIVATION_ITERATIONS: u32 = 10_000;
 
+pub fn rfid_reader_mode() -> shared::bambu_reader::ReaderMode {
+    match option_env!("FILASCAN_RFID_READER") {
+        Some("pn532") => shared::bambu_reader::ReaderMode::Pn532,
+        Some("pn5180") => shared::bambu_reader::ReaderMode::Pn5180,
+        _ => shared::bambu_reader::ReaderMode::Auto,
+    }
+}
+
 // OTA is intentionally not exposed by FilaScan. These values only satisfy the
 // generic hardware framework configuration until a FilaScan update path exists.
 pub const OTA_DOMAIN: &str = "";

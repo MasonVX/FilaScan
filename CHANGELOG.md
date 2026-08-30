@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Added separate PN532 and PN5180 reader backends behind a common event
+  interface.
+- Added automatic reader detection with PN5180 version validation and PN532
+  fallback.
+- Added PN5180 ISO/IEC 14443-A activation, hardware MIFARE Classic
+  authentication and Bambu payload reading.
+- Added PN5180 receive-status validation, tag-removal debouncing and targeted
+  hardware recovery for BUSY, SPI and pin failures.
+- Kept completed PN5180 scans latched until the RFID field has been continuously
+  empty, preventing repeated reads of a stationary spool and alternation between
+  its two tags.
+- Added build-time reader overrides through `FILASCAN_RFID_READER`.
+
 ## 0.2.0 - 2026-08-12
 
 - Added English and German device and configuration interfaces with persistent

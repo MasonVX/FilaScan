@@ -14,13 +14,14 @@ diagnostics.
 The repository is derived from `yanshay/SpoolEase` through
 `mybesttools/SpoolEase`. The retained code covers the WT32-SC01 Plus hardware
 foundation, PN532 communication, Bambu key derivation and Wi-Fi provisioning.
+FilaScan also supports a PN5180 reader through its own backend.
 
 ## Build
 
 - Target: `xtensa-esp32s3-none-elf`
 - Toolchain: `esp190`, Espressif Rust `1.90.0.0`
 - Host tools: `espup 0.17.1`, `espflash 4.5.0`
-- Hardware: WT32-SC01 Plus with 16 MB flash and PN532 over SPI
+- Hardware: WT32-SC01 Plus with 16 MB flash and PN532 or PN5180 over SPI
 - Rust package and ELF name: `FilaScan`
 
 Use the repository scripts:
@@ -44,20 +45,25 @@ The ELF is written to
 | `core/src/app.rs` | Reader events and Slint state updates |
 | `core/ui/` | On-device spool overview |
 | `core/static/` | Wi-Fi-only web configuration |
-| `shared/src/bambu_reader.rs` | Continuous PN532 scan loop |
-| `shared/src/nfc.rs` | Required Bambu tag blocks |
-| `shared/src/pn532_ext.rs` | MIFARE reads and Bambu key derivation |
+| `shared/src/bambu_reader.rs` | Reader selection and hardware-neutral events |
+| `shared/src/pn532_reader.rs` | PN532 scan and recovery loop |
+| `shared/src/pn532_ext.rs` | PN532 MIFARE block adapter |
+| `shared/src/pn5180.rs` | PN5180 command and ISO-A driver |
+| `shared/src/pn5180_reader.rs` | PN5180 scan and recovery loop |
+| `shared/src/nfc.rs` | Bambu key derivation and required tag blocks |
 | `.github/workflows/firmware.yml` | Reproducible CI firmware build |
 
 ## Constraints
 
-- Preserve the WT32-SC01 Plus and PN532 pin assignment unless a new board target
-  is introduced explicitly.
+- Preserve the WT32-SC01 Plus reader pin assignment and the automatic
+  PN5180-to-PN532 selection unless a new board target is introduced explicitly.
 - Keep RFID operation read-only.
 - Preserve partial Bambu payload blocks across retries; marginal RF coupling
   must not force already-read sectors to be fetched again.
-- After a MIFARE read failure, return to `InListPassiveTarget`; do not add
+- After a PN532 MIFARE read failure, return to `InListPassiveTarget`; do not add
   `InRelease`/`InSelect` retries that bypass the original SpoolEase reader flow.
+- Keep reader-specific behavior behind the hardware-neutral `ReaderEvent`
+  interface. Shared Bambu tag knowledge belongs in `shared/src/nfc.rs`.
 - Keep material and color mapping local and retain raw values as the fallback
   for unknown Bambu entries.
 - Do not add inventory, printer, MQTT, scale or OTA controls to the Wi-Fi and

@@ -1,8 +1,9 @@
 # FilaScan
 
 FilaScan is firmware for a standalone Bambu Lab filament spool reader. It runs
-on a WT32-SC01 Plus with a PN532 RFID reader and shows the spool information on
-the integrated display immediately after a factory tag is scanned.
+on a WT32-SC01 Plus with a PN532 or PN5180 RFID reader and shows the spool
+information on the integrated display immediately after a factory tag is
+scanned.
 
 FilaScan is derived from the original
 [yanshay/SpoolEase](https://github.com/yanshay/SpoolEase) implementation through
@@ -133,7 +134,7 @@ Spoolman support may be implemented as a separate integration later.
 Supported hardware:
 
 - WT32-SC01 Plus with ESP32-S3 and 16 MB flash
-- PN532 RFID reader connected over SPI
+- PN532 or PN5180 RFID reader connected over SPI
 - ESP32-S3 USB JTAG/serial interface for flashing
 - optional FAT-formatted microSD card for the Bambu catalog and product image caches
 
@@ -147,9 +148,46 @@ Supported hardware:
 | MISO | 12 |
 | CS | 10 |
 
-The PN532 SPI interface uses mode 0 at 2 MHz. Display, touch and board wiring
-follow the original
+The PN532 backend uses SPI mode 0 on the shared 500 kHz reader bus. Display,
+touch and board wiring follow the original
 [SpoolEase Console hardware documentation](https://docs.spoolease.io/docs/build-setup/console-build).
+
+### PN5180 wiring
+
+FilaScan supports the common `PN5180-NFC R1.1-170710` module. Connect both
+power rails shown on that module.
+
+| PN5180 signal | WT32-SC01 Plus |
+|---|---:|
+| +5V | Extended I/O pin 1 (+5V) |
+| +3.3V | Debug header +3.3V |
+| RST | GPIO 21 (Extended I/O pin 8) |
+| NSS | GPIO 10 |
+| MOSI | GPIO 11 |
+| MISO | GPIO 12 |
+| SCK | GPIO 13 |
+| BUSY | GPIO 14 |
+| GND | GND |
+
+Leave `GPIO`, `IRQ`, `AUX` and `REQ` disconnected. The PN5180 uses SPI mode 0,
+MSB first. The shared bus starts at 500 kHz for reliable detection of either
+reader. The PN532 backend reverses its wire bytes in software as required by
+the PN532 SPI protocol.
+
+At startup, FilaScan resets GPIO 21 and validates the PN5180 product, firmware
+and EEPROM versions. A valid response selects the PN5180 backend. Otherwise it
+starts the PN532 backend using GPIO 14 as its IRQ input. Only one reader module
+may be connected at a time.
+
+Automatic detection is the default. A build can force one backend when needed:
+
+```bash
+FILASCAN_RFID_READER=pn532 ./scripts/build-firmware.sh
+FILASCAN_RFID_READER=pn5180 ./scripts/build-firmware.sh
+```
+
+Any other value, or an unset variable, selects automatic detection. The
+explicit PN5180 mode does not fall back to PN532 when detection fails.
 
 ## Web interface
 
@@ -236,7 +274,11 @@ FilaScan version in `core/Cargo.toml` must match the numeric part of the tag.
 | `core/src/diagnostics.rs` | Bounded in-memory diagnostic log |
 | `core/ui/` | Slint display UI |
 | `core/static/` | Protected Wi-Fi, catalog and FilaMan configuration |
-| `shared/src/` | PN532 reader, MIFARE access and Bambu key derivation |
+| `shared/src/bambu_reader.rs` | Reader selection and hardware-neutral event interface |
+| `shared/src/pn532_reader.rs` | PN532 detection, ISO-A selection and read recovery |
+| `shared/src/pn5180.rs` | PN5180 SPI, BUSY, RF and MIFARE Classic driver |
+| `shared/src/pn5180_reader.rs` | PN5180 scan loop and Bambu payload reads |
+| `shared/src/nfc.rs` | Shared Bambu key derivation and payload block definition |
 | `scripts/` | macOS bootstrap, firmware build and flashing |
 
 ## AI-assisted development
@@ -257,6 +299,8 @@ and hardware testing process as other contributions.
 - [DigiCert trusted root certificates](https://www.digicert.com/kb/digicert-root-certificates.htm)
 - [Let's Encrypt certificates](https://letsencrypt.org/certificates/)
 - [NXP PN532](https://www.nxp.com/products/rfid-nfc/nfc-hf/nfc-readers/standard-performance-mifare-and-ntag-frontend:PN5321A3HN)
+- [NXP PN5180](https://www.nxp.com/products/PN5180)
+- [NXP AN12650: Using the PN5180 without library](https://www.nxp.com/docs/en/application-note/AN12650.pdf)
 - [Spoolman](https://github.com/Donkie/Spoolman)
 
 ## License
