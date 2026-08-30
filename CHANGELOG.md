@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added one-time FilaMan device-code registration to the protected web
+  interface. FilaScan exchanges the six-character code for a permanent device
+  token, validates it and stores it on the SD card without logging the code or
+  token. The stored token is never returned to the browser; the UI exposes only
+  registration status, non-secret device identity and local logout.
 - Added separate PN532 and PN5180 reader backends behind a common event
   interface.
 - Added automatic reader detection with PN5180 version validation and PN532

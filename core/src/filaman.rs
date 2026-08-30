@@ -51,6 +51,9 @@ impl Default for FilaManSettings {
 pub struct FilaManStatus {
     pub state: String,
     pub busy: bool,
+    pub registered: bool,
+    pub device_id: Option<u64>,
+    pub device_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -100,6 +103,7 @@ pub struct FilaManService {
     diagnostics: Rc<RefCell<LogBuffer>>,
     settings: RefCell<FilaManSettings>,
     state: RefCell<String>,
+    device_name: RefCell<Option<String>>,
     busy: Cell<bool>,
     sdcard_available: bool,
 }
@@ -111,6 +115,7 @@ impl FilaManService {
             diagnostics,
             settings: RefCell::new(FilaManSettings::default()),
             state: RefCell::new("Not configured".to_string()),
+            device_name: RefCell::new(None),
             busy: Cell::new(false),
             sdcard_available,
         })
@@ -121,9 +126,14 @@ impl FilaManService {
     }
 
     pub fn status(&self) -> FilaManStatus {
+        let settings = self.settings.borrow();
+        let device_id = device_id_from_token(&settings.device_token);
         FilaManStatus {
             state: self.state.borrow().clone(),
             busy: self.busy.get(),
+            registered: device_id.is_some(),
+            device_id,
+            device_name: self.device_name.borrow().clone(),
         }
     }
 
@@ -184,6 +194,35 @@ impl FilaManService {
             .map_err(|_| "Could not start FilaMan settings save task".to_string())
     }
 
+    pub fn update_connection_settings(
+        self: &Rc<Self>,
+        enabled: bool,
+        base_url: String,
+        ca_certificate_pem: String,
+    ) -> Result<(), String> {
+        let device_token = self.settings.borrow().device_token.clone();
+        self.set_settings(FilaManSettings {
+            enabled,
+            base_url,
+            device_token,
+            ca_certificate_pem,
+        })
+    }
+
+    pub fn forget_registration(self: &Rc<Self>) -> Result<(), String> {
+        let current = self.settings.borrow().clone();
+        self.set_settings(FilaManSettings {
+            enabled: false,
+            base_url: current.base_url,
+            device_token: String::new(),
+            ca_certificate_pem: current.ca_certificate_pem,
+        })?;
+        *self.device_name.borrow_mut() = None;
+        *self.state.borrow_mut() = "Device registration removed from FilaScan".to_string();
+        self.log_info("FilaMan device token removed from FilaScan");
+        Ok(())
+    }
+
     pub fn request_test(self: &Rc<Self>) -> Result<(), String> {
         let endpoint = parse_base_url(&self.settings.borrow().base_url)?;
         if self.busy.replace(true) {
@@ -209,6 +248,11 @@ impl FilaManService {
                             && response.get("location_management").and_then(Value::as_bool) == Some(true)
                             && response.get("spool_archiving").and_then(Value::as_bool) == Some(true) =>
                     {
+                        *service.device_name.borrow_mut() = response
+                            .get("device_name")
+                            .and_then(Value::as_str)
+                            .filter(|name| !name.trim().is_empty())
+                            .map(|name| name.trim().to_string());
                         *service.state.borrow_mut() = "Connected".to_string();
                         service.log_info("FilaMan plugin connection test succeeded");
                     }
@@ -232,6 +276,87 @@ impl FilaManService {
         {
             self.busy.set(false);
             return Err("Could not start FilaMan connection test".to_string());
+        }
+        Ok(())
+    }
+
+    pub fn request_registration(
+        self: &Rc<Self>,
+        base_url: String,
+        device_code: String,
+        ca_certificate_pem: String,
+        enabled: bool,
+    ) -> Result<(), String> {
+        if !self.sdcard_available {
+            return Err("FilaMan device registration requires an SD card to store the issued token".to_string());
+        }
+
+        let device_code = device_code.trim().to_ascii_uppercase();
+        validate_device_code(&device_code)?;
+        let registration_settings = FilaManSettings {
+            enabled: false,
+            base_url,
+            device_token: String::new(),
+            ca_certificate_pem,
+        };
+        validate_registration_settings(&registration_settings)?;
+        let endpoint = parse_base_url(&registration_settings.base_url)?;
+
+        if self.busy.replace(true) {
+            return Err("A FilaMan request is already running".to_string());
+        }
+        self.log_info(&format!(
+            "FilaMan: registering device at {}://{}:{}{}",
+            if endpoint.secure { "https" } else { "http" },
+            endpoint.host,
+            endpoint.port,
+            endpoint.base_path
+        ));
+        *self.state.borrow_mut() = "Registering device".to_string();
+
+        let service = self.clone();
+        let spawner = self.framework.borrow().spawner;
+        if spawner
+            .spawn_heap(async move {
+                let result = service.register_device(&registration_settings, &device_code).await;
+                match result {
+                    Ok(device_token) => {
+                        let settings = FilaManSettings {
+                            enabled,
+                            base_url: registration_settings.base_url,
+                            device_token,
+                            ca_certificate_pem: registration_settings.ca_certificate_pem,
+                        };
+                        *service.settings.borrow_mut() = settings;
+                        *service.device_name.borrow_mut() = None;
+                        match service.persist_settings().await {
+                            Ok(()) => {
+                                *service.state.borrow_mut() =
+                                    "Device registered; authorize it in the FilaScan import plugin".to_string();
+                                service.log_info(
+                                    "FilaMan device registration succeeded; device token stored on SD card",
+                                );
+                            }
+                            Err(error) => {
+                                *service.state.borrow_mut() =
+                                    "Device registered, but the token could not be stored".to_string();
+                                service.log_warn(&format!(
+                                    "FilaMan issued a device token, but it could not be persisted: {error}"
+                                ));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        *service.state.borrow_mut() = format!("Registration failed: {error}");
+                        service.log_warn(&format!("FilaMan device registration failed: {error}"));
+                    }
+                }
+                service.busy.set(false);
+            })
+            .is_err()
+        {
+            self.busy.set(false);
+            return Err("Could not start FilaMan device registration".to_string());
         }
         Ok(())
     }
@@ -562,6 +687,37 @@ impl FilaManService {
 
     async fn api_request(&self, method: Method, path: &str, body: Option<&[u8]>) -> Result<Value, String> {
         let settings = self.settings.borrow().clone();
+        self.api_request_with_settings(&settings, method, path, body, ApiAuthentication::DeviceToken)
+            .await
+    }
+
+    async fn register_device(&self, settings: &FilaManSettings, device_code: &str) -> Result<String, String> {
+        let response = self
+            .api_request_with_settings(
+                settings,
+                Method::Post,
+                "/devices/register",
+                None,
+                ApiAuthentication::RegistrationCode(device_code),
+            )
+            .await?;
+        let token = response
+            .get("token")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "FilaMan registration response does not contain a device token".to_string())?
+            .to_string();
+        validate_device_token(&token)?;
+        Ok(token)
+    }
+
+    async fn api_request_with_settings(
+        &self,
+        settings: &FilaManSettings,
+        method: Method,
+        path: &str,
+        body: Option<&[u8]>,
+        authentication: ApiAuthentication<'_>,
+    ) -> Result<Value, String> {
         let endpoint = parse_base_url(&settings.base_url)?;
         let (stack, tls) = {
             let framework = self.framework.borrow();
@@ -585,10 +741,13 @@ impl FilaManService {
         let mut headers = vec![
             ("Host", endpoint.host.as_str()),
             ("Accept", "application/json"),
-            ("Authorization", authorization.as_str()),
             ("User-Agent", "FilaScan"),
             ("Connection", "close"),
         ];
+        match authentication {
+            ApiAuthentication::DeviceToken => headers.push(("Authorization", authorization.as_str())),
+            ApiAuthentication::RegistrationCode(device_code) => headers.push(("X-Device-Code", device_code)),
+        }
         if body.is_some() {
             headers.push(("Content-Type", "application/json"));
             headers.push(("Content-Length", content_length.as_str()));
@@ -600,7 +759,8 @@ impl FilaManService {
         if endpoint.secure {
             let mut tcp_buffers = Box::new(TcpBuffers::<1, 2048, 8192>::new());
             let tcp = Tcp::new(stack, &mut *tcp_buffers);
-            let ca_pem = CString::new(settings.ca_certificate_pem).map_err(|_| "FilaMan CA certificate contains a null byte".to_string())?;
+            let ca_pem = CString::new(settings.ca_certificate_pem.as_str())
+                .map_err(|_| "FilaMan CA certificate contains a null byte".to_string())?;
             let ca_chain = X509::pem(ca_pem.as_bytes_with_nul()).map_err(|error| format!("Invalid FilaMan CA certificate: {error:?}"))?;
             let certificates = Certificates {
                 ca_chain: Some(ca_chain),
@@ -700,6 +860,11 @@ struct Endpoint {
     secure: bool,
 }
 
+enum ApiAuthentication<'a> {
+    DeviceToken,
+    RegistrationCode(&'a str),
+}
+
 fn validate_settings(settings: &FilaManSettings) -> Result<(), String> {
     if !settings.enabled && settings.base_url.is_empty() && settings.device_token.is_empty() && settings.ca_certificate_pem.is_empty() {
         return Ok(());
@@ -720,6 +885,47 @@ fn validate_settings(settings: &FilaManSettings) -> Result<(), String> {
         return Err("FilaMan CA certificate in PEM format is required when location-assisted import is enabled".to_string());
     }
     Ok(())
+}
+
+fn validate_registration_settings(settings: &FilaManSettings) -> Result<(), String> {
+    let endpoint = parse_base_url(&settings.base_url)?;
+    if endpoint.secure && !settings.ca_certificate_pem.contains("-----BEGIN CERTIFICATE-----") {
+        return Err("FilaMan CA certificate in PEM format is required for HTTPS device registration".to_string());
+    }
+    Ok(())
+}
+
+fn validate_device_code(code: &str) -> Result<(), String> {
+    if code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()) {
+        return Err("FilaMan device registration code must contain exactly 6 letters or digits".to_string());
+    }
+    Ok(())
+}
+
+fn validate_device_token(token: &str) -> Result<(), String> {
+    if token.len() > 512 || token.bytes().any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace()) {
+        return Err("FilaMan returned an invalid device token".to_string());
+    }
+    let mut parts = token.splitn(3, '.');
+    let prefix = parts.next();
+    let device_id = parts.next();
+    let secret = parts.next();
+    if prefix != Some("dev")
+        || device_id.and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).is_none()
+        || secret.is_none_or(|value| {
+            value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        })
+    {
+        return Err("FilaMan returned an invalid device token".to_string());
+    }
+    Ok(())
+}
+
+fn device_id_from_token(token: &str) -> Option<u64> {
+    if validate_device_token(token).is_err() {
+        return None;
+    }
+    token.split('.').nth(1)?.parse().ok()
 }
 
 fn parse_base_url(url: &str) -> Result<Endpoint, String> {

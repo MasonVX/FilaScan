@@ -149,6 +149,22 @@ textarea {
   font-size: 0.85rem;
 }
 
+.registration-card {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #3d7655;
+  border-radius: 8px;
+  background: #15291e;
+}
+
+.registration-card strong {
+  color: #5ee08a;
+}
+
+.registration-card button {
+  margin-top: 12px;
+}
+
 button {
   margin-top: 18px;
   border: 0;

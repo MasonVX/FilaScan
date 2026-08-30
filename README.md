@@ -114,9 +114,23 @@ transactional, idempotent creation or resolution of the manufacturer, colors,
 filament and spool.
 
 The compatible FilaMan integration plugin must be installed and the registered
-FilaScan device must be authorized by that plugin. Configure the FilaMan URL
-and the normal FilaMan device token on the protected web page. General FilaMan
-inventory scopes are not required. FilaMan integration is disabled by default.
+FilaScan device must be authorized by that plugin. Create a device in FilaMan,
+then enter its six-character one-time registration code on FilaScan's protected
+web page. FilaScan exchanges the code through
+`POST /api/v1/devices/register`, validates the returned
+`dev.<device-id>.<secret>` token and stores it on the SD card. The one-time code
+is never stored or written to the diagnostic log. The permanent token is never
+returned to the browser after it has been stored. The configuration page shows
+only the registration state and non-secret device identity. **Log out** removes
+the credential from FilaScan but does not delete or revoke the device in
+FilaMan.
+
+After registration, select the now-active device on the FilaScan import
+plugin's configuration page in FilaMan. General FilaMan inventory scopes are
+not required. FilaScan shows the numeric device ID from the token. It also
+accepts an optional `device_name` returned by the plugin status endpoint; older
+plugin versions that do not provide it fall back to `Device #<id>`. FilaMan
+integration is disabled by default.
 The connection test calls `GET /api/v1/devices/filascan/status` and verifies
 that the plugin reports `ready` with `location_selection: true` and
 `location_management: true` and `spool_archiving: true`.

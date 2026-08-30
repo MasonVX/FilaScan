@@ -76,13 +76,25 @@
         <input id="filaman-url" type="url" autocomplete="off" spellcheck="false" placeholder="http://192.168.5.20:8000">
         <p class="field-help" data-i18n="httpHelp">HTTP is supported for trusted local networks but sends the device token and spool data without transport encryption.</p>
 
-        <label for="filaman-token" data-i18n="deviceToken">Device access token</label>
-        <input id="filaman-token" type="password" autocomplete="off" spellcheck="false" placeholder="dev.…">
-        <p class="field-help" data-i18n="tokenHelp">The FilaScan integration plugin must be installed in FilaMan and authorize this registered device. General inventory scopes are not required.</p>
-
         <label for="filaman-ca" data-i18n="caCertificate">TLS CA certificate (PEM, HTTPS only)</label>
         <textarea id="filaman-ca" rows="7" autocomplete="off" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
         <p class="field-help" data-i18n="caHelp">Optional for HTTP. For HTTPS, use the CA certificate that issued the certificate for your FilaMan hostname.</p>
+
+        <div id="filaman-registration-form">
+          <label for="filaman-device-code" data-i18n="deviceCode">Device registration code</label>
+          <input id="filaman-device-code" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="6" placeholder="ABC123">
+          <p class="field-help" data-i18n="deviceCodeHelp">Create a device in FilaMan, enter its 6-character one-time code here, then authorize the registered device on the FilaScan import plugin page.</p>
+          <button id="filaman-register" type="button" data-i18n="registerDevice">Register device</button>
+        </div>
+
+        <div id="filaman-registration-status" class="registration-card" hidden>
+          <div>
+            <strong data-i18n="registered">Registered</strong>
+            <div id="filaman-device-identity" class="field-help"></div>
+          </div>
+          <button id="filaman-logout" class="secondary" type="button" data-i18n="logoutDevice">Log out</button>
+          <p class="field-help" data-i18n="logoutHelp">Logging out removes the stored token from FilaScan. Delete or revoke the device separately in FilaMan.</p>
+        </div>
 
         <label class="checkbox-row" for="filaman-enabled">
           <input id="filaman-enabled" type="checkbox">
@@ -112,8 +124,9 @@
           filamanIntegration: 'FilaMan integration',
           filamanDescription: "Choose a regular FilaMan storage location before adding a new spool, or press an existing spool's location button to move it. Bambu AMS locations are excluded. The Tray UID is used as external_id; the NFC Tag UID is never transmitted.",
           filamanUrl: 'FilaMan URL', httpHelp: 'HTTP is supported for trusted local networks but sends the device token and spool data without transport encryption.',
-          deviceToken: 'Device access token', tokenHelp: 'The FilaScan integration plugin must be installed in FilaMan and authorize this registered device. General inventory scopes are not required.',
           caCertificate: 'TLS CA certificate (PEM, HTTPS only)', caHelp: 'Optional for HTTP. For HTTPS, use the CA certificate that issued the certificate for your FilaMan hostname.',
+          deviceCode: 'Device registration code', deviceCodeHelp: 'Create a device in FilaMan, enter its 6-character one-time code here, then authorize the registered device on the FilaScan import plugin page.', registerDevice: 'Register device',
+          registered: 'Registered', logoutDevice: 'Log out', logoutHelp: 'Logging out removes the stored token from FilaScan. Delete or revoke the device separately in FilaMan.', deviceLabel: 'Device',
           enableFilaman: 'Enable FilaMan location selection after scanning', saveFilaman: 'Save FilaMan settings', testConnection: 'Test connection',
         },
         de: {
@@ -125,8 +138,9 @@
           filamanIntegration: 'FilaMan-Integration',
           filamanDescription: 'Wähle vor dem Hinzufügen einer neuen Spule einen regulären FilaMan-Lagerort oder verschiebe eine vorhandene Spule über ihren Standort-Button. Bambu-AMS-Standorte werden ausgeschlossen. Die Tray UID wird als external_id verwendet; die NFC Tag UID wird nie übertragen.',
           filamanUrl: 'FilaMan-URL', httpHelp: 'HTTP wird für vertrauenswürdige lokale Netzwerke unterstützt, überträgt Geräte-Token und Spulendaten jedoch unverschlüsselt.',
-          deviceToken: 'Gerätezugriffstoken', tokenHelp: 'Das FilaScan-Integrationsplugin muss in FilaMan installiert sein und dieses registrierte Gerät autorisieren. Allgemeine Bestandsberechtigungen sind nicht erforderlich.',
           caCertificate: 'TLS-CA-Zertifikat (PEM, nur HTTPS)', caHelp: 'Für HTTP optional. Verwende für HTTPS das CA-Zertifikat, das das Zertifikat des FilaMan-Hostnamens ausgestellt hat.',
+          deviceCode: 'Geräte-Registrierungscode', deviceCodeHelp: 'Lege in FilaMan ein Gerät an, trage hier dessen sechsstelligen Einmalcode ein und autorisiere das registrierte Gerät anschließend auf der Seite des FilaScan-Import-Plugins.', registerDevice: 'Gerät registrieren',
+          registered: 'Registriert', logoutDevice: 'Abmelden', logoutHelp: 'Beim Abmelden wird der gespeicherte Token aus FilaScan entfernt. Lösche oder widerrufe das Gerät separat in FilaMan.', deviceLabel: 'Gerät',
           enableFilaman: 'FilaMan-Standortauswahl nach dem Scannen aktivieren', saveFilaman: 'FilaMan-Einstellungen speichern', testConnection: 'Verbindung testen',
         },
       };
@@ -158,12 +172,19 @@
       const catalogAutoUpdateInput = document.querySelector('#catalog-auto-update');
       const catalogStatus = document.querySelector('#catalog-status');
       const filamanUrlInput = document.querySelector('#filaman-url');
-      const filamanTokenInput = document.querySelector('#filaman-token');
+      const filamanRegistrationForm = document.querySelector('#filaman-registration-form');
+      const filamanRegistrationStatus = document.querySelector('#filaman-registration-status');
+      const filamanDeviceCodeInput = document.querySelector('#filaman-device-code');
+      const filamanRegisterButton = document.querySelector('#filaman-register');
+      const filamanDeviceIdentity = document.querySelector('#filaman-device-identity');
+      const filamanLogoutButton = document.querySelector('#filaman-logout');
       const filamanCaInput = document.querySelector('#filaman-ca');
       const filamanEnabledInput = document.querySelector('#filaman-enabled');
       const filamanStatus = document.querySelector('#filaman-status');
+      const filamanTestButton = document.querySelector('#filaman-test');
       let encryptionKey;
       let lastLogText = '';
+      let filamanRegistrationPending = false;
 
       async function refreshLogs() {
         try {
@@ -223,12 +244,24 @@
 
       function renderFilaManStatus(config) {
         filamanStatus.textContent = `${config.busy ? tr('Working', 'In Arbeit') : config.state} · ${config.enabled ? tr('location selection enabled', 'Standortauswahl aktiviert') : tr('location selection disabled', 'Standortauswahl deaktiviert')}`;
+        filamanRegistrationForm.hidden = config.registered === true;
+        filamanRegistrationStatus.hidden = config.registered !== true;
+        const fallbackIdentity = config.device_id ? `${translations[currentLanguage].deviceLabel} #${config.device_id}` : translations[currentLanguage].deviceLabel;
+        filamanDeviceIdentity.textContent = config.device_name || fallbackIdentity;
+        filamanRegisterButton.disabled = config.busy === true || config.registered === true;
+        filamanLogoutButton.disabled = config.busy === true;
+        filamanTestButton.disabled = config.busy === true || config.registered !== true;
       }
 
       async function refreshFilaManStatus() {
         if (!encryptionKey || filamanSection.hidden) return;
         try {
-          renderFilaManStatus(await readFilaMan());
+          const config = await readFilaMan();
+          renderFilaManStatus(config);
+          if (filamanRegistrationPending && !config.busy) {
+            filamanRegistrationPending = false;
+            if (config.registered) filamanDeviceCodeInput.value = '';
+          }
         } catch (error) {
           filamanStatus.textContent = `${tr('Could not read FilaMan status', 'FilaMan-Status konnte nicht gelesen werden')}: ${error.message}`;
         }
@@ -270,7 +303,6 @@
           catalogAutoUpdateInput.checked = catalog.auto_update !== false;
           renderCatalogStatus(catalog);
           filamanUrlInput.value = filaman.base_url || '';
-          filamanTokenInput.value = filaman.device_token || '';
           filamanCaInput.value = filaman.ca_certificate_pem || '';
           filamanEnabledInput.checked = filaman.enabled === true;
           renderFilaManStatus(filaman);
@@ -328,13 +360,47 @@
       setInterval(refreshCatalogStatus, 2000);
       setInterval(refreshFilaManStatus, 2000);
 
+      filamanRegisterButton.addEventListener('click', async () => {
+        filamanStatus.textContent = tr('Registering device with FilaMan…', 'Gerät wird bei FilaMan registriert…');
+        filamanRegisterButton.disabled = true;
+        filamanRegistrationPending = true;
+        try {
+          const response = await send('/api/filaman-register', {
+            enabled: filamanEnabledInput.checked,
+            base_url: filamanUrlInput.value.trim(),
+            device_code: filamanDeviceCodeInput.value.trim(),
+            ca_certificate_pem: filamanCaInput.value.trim(),
+          });
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          setTimeout(refreshFilaManStatus, 500);
+        } catch (error) {
+          filamanRegistrationPending = false;
+          filamanStatus.textContent = `${tr('Could not register FilaScan', 'FilaScan konnte nicht registriert werden')}: ${error.message}`;
+          filamanRegisterButton.disabled = false;
+        }
+      });
+
+      filamanLogoutButton.addEventListener('click', async () => {
+        filamanStatus.textContent = tr('Removing FilaMan registration…', 'FilaMan-Registrierung wird entfernt…');
+        filamanLogoutButton.disabled = true;
+        try {
+          const response = await send('/api/filaman-logout', {});
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          await refreshFilaManStatus();
+        } catch (error) {
+          filamanStatus.textContent = `${tr('Could not log out', 'Abmelden fehlgeschlagen')}: ${error.message}`;
+          filamanLogoutButton.disabled = false;
+        }
+      });
+
       document.querySelector('#filaman-save').addEventListener('click', async () => {
         filamanStatus.textContent = tr('Saving FilaMan settings…', 'FilaMan-Einstellungen werden gespeichert…');
         try {
           const response = await send('/api/filaman-config', {
             enabled: filamanEnabledInput.checked,
             base_url: filamanUrlInput.value.trim(),
-            device_token: filamanTokenInput.value.trim(),
             ca_certificate_pem: filamanCaInput.value.trim(),
           });
           const result = JSON.parse(decrypt(encryptionKey, await response.text()));
@@ -352,7 +418,6 @@
           const saveResponse = await send('/api/filaman-config', {
             enabled: filamanEnabledInput.checked,
             base_url: filamanUrlInput.value.trim(),
-            device_token: filamanTokenInput.value.trim(),
             ca_certificate_pem: filamanCaInput.value.trim(),
           });
           const saveResult = JSON.parse(decrypt(encryptionKey, await saveResponse.text()));

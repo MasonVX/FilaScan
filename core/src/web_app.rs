@@ -20,7 +20,7 @@ use crate::{
     app::{AppWindow, ReaderState},
     catalog::{CatalogService, CatalogSettings},
     diagnostics::LogBuffer,
-    filaman::{FilaManService, FilaManSettings},
+    filaman::FilaManService,
     localization::{Language, LocalizationService},
 };
 
@@ -154,13 +154,15 @@ impl AppWithStateBuilder for WifiAppBuilder {
                 let settings = state.filaman.settings();
                 let status = state.filaman.status();
                 ready(
-                    FilaManConfigDto {
+                    FilaManConfigResponse {
                         enabled: settings.enabled,
                         base_url: settings.base_url,
-                        device_token: settings.device_token,
                         ca_certificate_pem: settings.ca_certificate_pem,
                         state: status.state,
                         busy: status.busy,
+                        registered: status.registered,
+                        device_id: status.device_id,
+                        device_name: status.device_name,
                     }
                     .encrypt(&key.borrow()),
                 )
@@ -171,16 +173,53 @@ impl AppWithStateBuilder for WifiAppBuilder {
                         let result = decrypt(&key.borrow(), body.as_bytes())
                             .map_err(|error| format!("Could not decrypt request: {error}"))
                             .and_then(|json| {
-                                serde_json::from_str::<FilaManConfigDto>(&json).map_err(|error| format!("Invalid FilaMan settings: {error}"))
+                                serde_json::from_str::<FilaManConfigUpdate>(&json)
+                                    .map_err(|error| format!("Invalid FilaMan settings: {error}"))
                             })
                             .and_then(|config| {
-                                state.filaman.set_settings(FilaManSettings {
-                                    enabled: config.enabled,
-                                    base_url: config.base_url,
-                                    device_token: config.device_token,
-                                    ca_certificate_pem: config.ca_certificate_pem,
-                                })
+                                state.filaman.update_connection_settings(
+                                    config.enabled,
+                                    config.base_url,
+                                    config.ca_certificate_pem,
+                                )
                             });
+                        CatalogActionResponse { error_text: result.err() }.encrypt(&key.borrow())
+                    })
+                },
+            ),
+        )
+        .route(
+            "/api/filaman-register",
+            post(
+                |State(Encryption(key)): State<Encryption>, State(state): State<FilaScanWebState>, body: String| {
+                    ready({
+                        let result = decrypt(&key.borrow(), body.as_bytes())
+                            .map_err(|error| format!("Could not decrypt request: {error}"))
+                            .and_then(|json| {
+                                serde_json::from_str::<FilaManRegistrationDto>(&json)
+                                    .map_err(|error| format!("Invalid FilaMan registration request: {error}"))
+                            })
+                            .and_then(|request| {
+                                state.filaman.request_registration(
+                                    request.base_url,
+                                    request.device_code,
+                                    request.ca_certificate_pem,
+                                    request.enabled,
+                                )
+                            });
+                        CatalogActionResponse { error_text: result.err() }.encrypt(&key.borrow())
+                    })
+                },
+            ),
+        )
+        .route(
+            "/api/filaman-logout",
+            post(
+                |State(Encryption(key)): State<Encryption>, State(state): State<FilaScanWebState>, body: String| {
+                    ready({
+                        let result = decrypt(&key.borrow(), body.as_bytes())
+                            .map_err(|error| format!("Could not decrypt request: {error}"))
+                            .and_then(|_| state.filaman.forget_registration());
                         CatalogActionResponse { error_text: result.err() }.encrypt(&key.borrow())
                     })
                 },
@@ -226,14 +265,29 @@ struct CatalogActionResponse {
     error_text: Option<String>,
 }
 
-#[derive(Deserialize, Serialize)]
-struct FilaManConfigDto {
+#[derive(Serialize)]
+struct FilaManConfigResponse {
     enabled: bool,
     base_url: String,
-    device_token: String,
     ca_certificate_pem: String,
-    #[serde(default)]
     state: String,
-    #[serde(default)]
     busy: bool,
+    registered: bool,
+    device_id: Option<u64>,
+    device_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FilaManConfigUpdate {
+    enabled: bool,
+    base_url: String,
+    ca_certificate_pem: String,
+}
+
+#[derive(Deserialize)]
+struct FilaManRegistrationDto {
+    enabled: bool,
+    base_url: String,
+    device_code: String,
+    ca_certificate_pem: String,
 }
