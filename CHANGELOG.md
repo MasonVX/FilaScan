@@ -7,6 +7,9 @@
   token, validates it and stores it on the SD card without logging the code or
   token. The stored token is never returned to the browser; the UI exposes only
   registration status, non-secret device identity and local logout.
+- Serialized background log, catalog and FilaMan status polling in the web
+  interface so browser keep-alive requests do not exhaust the device's two HTTP
+  workers while the protected configuration is being unlocked.
 - Added separate PN532 and PN5180 reader backends behind a common event
   interface.
 - Added automatic reader detection with PN5180 version validation and PN532

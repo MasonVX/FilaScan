@@ -185,8 +185,34 @@
       let encryptionKey;
       let lastLogText = '';
       let filamanRegistrationPending = false;
+      let foregroundRequestActive = false;
+      let backgroundRequestActive = false;
+
+      const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+      async function beginForegroundRequest() {
+        foregroundRequestActive = true;
+        for (let attempt = 0; attempt < 20 && backgroundRequestActive; attempt += 1) {
+          await delay(50);
+        }
+      }
+
+      function endForegroundRequest() {
+        foregroundRequestActive = false;
+      }
+
+      function beginBackgroundRequest() {
+        if (foregroundRequestActive || backgroundRequestActive) return false;
+        backgroundRequestActive = true;
+        return true;
+      }
+
+      function endBackgroundRequest() {
+        backgroundRequestActive = false;
+      }
 
       async function refreshLogs() {
+        if (!beginBackgroundRequest()) return;
         try {
           const response = await fetch('/api/logs', { cache: 'no-store' });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -202,11 +228,13 @@
         } catch (error) {
           logStatus.textContent = `${tr('Disconnected', 'Getrennt')}: ${error.message}`;
           logStatus.classList.add('offline');
+        } finally {
+          endBackgroundRequest();
         }
       }
 
       refreshLogs();
-      setInterval(refreshLogs, 750);
+      setInterval(refreshLogs, 1500);
 
       async function send(path, data) {
         const response = await fetch(path, {
@@ -255,6 +283,7 @@
 
       async function refreshFilaManStatus() {
         if (!encryptionKey || filamanSection.hidden) return;
+        if (!beginBackgroundRequest()) return;
         try {
           const config = await readFilaMan();
           renderFilaManStatus(config);
@@ -264,6 +293,8 @@
           }
         } catch (error) {
           filamanStatus.textContent = `${tr('Could not read FilaMan status', 'FilaMan-Status konnte nicht gelesen werden')}: ${error.message}`;
+        } finally {
+          endBackgroundRequest();
         }
       }
 
@@ -275,10 +306,13 @@
 
       async function refreshCatalogStatus() {
         if (!encryptionKey || catalogSection.hidden) return;
+        if (!beginBackgroundRequest()) return;
         try {
           renderCatalogStatus(await readCatalog());
         } catch (error) {
           catalogStatus.textContent = `${tr('Could not read catalog status', 'Katalogstatus konnte nicht gelesen werden')}: ${error.message}`;
+        } finally {
+          endBackgroundRequest();
         }
       }
 
@@ -288,6 +322,7 @@
         wifiSection.hidden = true;
         catalogSection.hidden = true;
         filamanSection.hidden = true;
+        await beginForegroundRequest();
         try {
           encryptionKey = derive_key(keyInput.value.trim(), 'example_salt');
           await send('/api/test-key', { test: 'FilaScan' });
@@ -313,6 +348,8 @@
           filamanSection.hidden = false;
         } catch (error) {
           keyStatus.textContent = `${tr('Could not unlock setup', 'Einrichtung konnte nicht entsperrt werden')}: ${error.message}`;
+        } finally {
+          endForegroundRequest();
         }
       });
 
