@@ -200,6 +200,12 @@ and EEPROM versions. A valid response selects the PN5180 backend. Otherwise it
 starts the PN532 backend using GPIO 14 as its IRQ input. Only one reader module
 may be connected at a time.
 
+The PN5180 backend retains successfully decoded payload blocks across retries.
+It allows up to five payload attempts but stops after two consecutive attempts
+without reading another block. A tag is considered removed after 750 ms of
+confirmed absence, and persistent transient activation errors trigger an RF
+field refresh after two seconds.
+
 Automatic detection is the default. A build can force one backend when needed:
 
 ```bash

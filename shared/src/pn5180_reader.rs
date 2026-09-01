@@ -22,9 +22,11 @@ type Device = Pn5180<
     esp_hal::gpio::Output<'static>,
 >;
 
-const TAG_REMOVAL_GRACE: Duration = Duration::from_millis(1_500);
+const TAG_REMOVAL_GRACE: Duration = Duration::from_millis(750);
 const POLL_INTERVAL: Duration = Duration::from_millis(150);
-const TRANSIENT_ERROR_RECOVERY_INTERVAL: Duration = Duration::from_secs(8);
+const TRANSIENT_ERROR_RECOVERY_INTERVAL: Duration = Duration::from_secs(2);
+const MAX_PAYLOAD_ATTEMPTS: u8 = 5;
+const MAX_STALLED_ATTEMPTS: u8 = 2;
 
 #[derive(Debug)]
 struct PayloadError {
@@ -46,6 +48,7 @@ pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
     let mut pending_uid: Option<[u8; 4]> = None;
     let mut pending_blocks = HashMap::new();
     let mut pending_attempt = 0_u8;
+    let mut stalled_attempts = 0_u8;
     let mut prefetched_target = None;
     let mut missing_since: Option<Instant> = None;
     let mut transient_error_since: Option<Instant> = None;
@@ -125,6 +128,7 @@ pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
                 }
                 pending_blocks.clear();
                 pending_attempt = 0;
+                stalled_attempts = 0;
                 missing_since = None;
             }
             Timer::after(POLL_INTERVAL).await;
@@ -163,6 +167,7 @@ pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
             pending_uid = Some(target.uid);
             pending_blocks.clear();
             pending_attempt = 0;
+            stalled_attempts = 0;
             reader.borrow().notify_event(ReaderEvent::Reading {
                 tag_uid: uid.clone(),
                 atqa: target.atqa,
@@ -171,6 +176,7 @@ pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
         }
 
         pending_attempt += 1;
+        let blocks_before_attempt = pending_blocks.len();
         match read_payload(&mut pn5180, &target.uid, &mut pending_blocks).await {
             Ok(()) => {
                 reader.borrow().notify_event(ReaderEvent::Spool {
@@ -180,17 +186,24 @@ pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
                 completed_uid = Some(target.uid);
                 pending_uid = None;
                 pending_attempt = 0;
+                stalled_attempts = 0;
             }
             Err(read_error) => {
+                if pending_blocks.len() > blocks_before_attempt {
+                    stalled_attempts = 0;
+                } else {
+                    stalled_attempts = stalled_attempts.saturating_add(1);
+                }
                 let detail = format!(
-                    "RFID payload attempt {}/5 failed after {}/{} blocks: PN5180 block {}: {:?}",
+                    "RFID payload attempt {}/{} failed after {}/{} blocks: PN5180 block {}: {:?}",
                     pending_attempt,
+                    MAX_PAYLOAD_ATTEMPTS,
                     pending_blocks.len(),
                     nfc::PAYLOAD_BLOCK_COUNT,
                     read_error.block,
                     read_error.source
                 );
-                if pending_attempt < 5 {
+                if pending_attempt < MAX_PAYLOAD_ATTEMPTS && stalled_attempts < MAX_STALLED_ATTEMPTS {
                     reader.borrow().notify_event(ReaderEvent::Retrying {
                         tag_uid: uid,
                         next_attempt: pending_attempt + 1,
@@ -198,6 +211,11 @@ pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
                     });
                     prefetched_target = reacquire_with_recovery(&mut pn5180).await;
                 } else {
+                    let detail = if stalled_attempts >= MAX_STALLED_ATTEMPTS {
+                        format!("{detail}; stopping after {MAX_STALLED_ATTEMPTS} attempts without progress")
+                    } else {
+                        detail
+                    };
                     error!("{detail}");
                     reader.borrow().notify_event(ReaderEvent::ReadFailed {
                         tag_uid: Some(uid),
@@ -207,6 +225,7 @@ pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
                     pending_uid = None;
                     pending_blocks.clear();
                     pending_attempt = 0;
+                    stalled_attempts = 0;
                 }
             }
         }

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reduced PN5180 tag-removal confirmation to 750 ms and transient RF recovery
+  to two seconds. Payload reads now stop after two consecutive attempts without
+  additional blocks while retaining the five-attempt maximum.
 - Added a boot-only Wi-Fi fallback that starts the setup access point after 60
   seconds without a connection or IPv4 address while retaining stored
   credentials. Later connection losses do not activate the fallback.
