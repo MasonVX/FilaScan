@@ -107,7 +107,7 @@ impl FilamentSpool {
         if let Some(location) = &tag.storage_location {
             additional_details.push(format!("Tag location {location}"));
         }
-        let color_name = product_variant_name(&material_name, &material_type);
+        let color_name = manufacturer_color_name(tag.brand_name.as_deref(), &material_name, &material_type);
         Self {
             source: SpoolSource::OpenPrintTag,
             external_id,
@@ -166,22 +166,32 @@ fn format_uuid(uuid: [u8; 16]) -> String {
     )
 }
 
-fn product_variant_name(material_name: &str, material_type: &str) -> String {
-    material_name
-        .strip_prefix(material_type)
-        .map(|suffix| suffix.trim_start_matches([' ', '-', '·', '/']).trim())
-        .filter(|suffix| !suffix.is_empty())
-        .map(String::from)
-        .unwrap_or_default()
+fn manufacturer_color_name(brand: Option<&str>, material_name: &str, material_type: &str) -> String {
+    match brand {
+        Some(brand) if brand.eq_ignore_ascii_case("Prusament") || brand.eq_ignore_ascii_case("Prusa") => material_name
+            .strip_prefix(material_type)
+            .map(|suffix| suffix.trim_start_matches([' ', '-', '·', '/']).trim())
+            .filter(|suffix| !suffix.is_empty())
+            .map(String::from)
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::product_variant_name;
+    use super::manufacturer_color_name;
 
     #[test]
-    fn uses_openprinttag_material_suffix_as_product_variant() {
-        assert_eq!(product_variant_name("PLA Galaxy Black", "PLA"), "Galaxy Black");
-        assert_eq!(product_variant_name("PETG", "PETG"), "");
+    fn uses_prusament_material_suffix_as_color_name() {
+        assert_eq!(manufacturer_color_name(Some("Prusament"), "PLA Galaxy Black", "PLA"), "Galaxy Black");
+        assert_eq!(manufacturer_color_name(Some("Prusa"), "PETG Prusa Galaxy Black", "PETG"), "Prusa Galaxy Black");
+        assert_eq!(manufacturer_color_name(Some("Prusament"), "PETG", "PETG"), "");
+    }
+
+    #[test]
+    fn does_not_apply_prusament_naming_to_other_manufacturers() {
+        assert_eq!(manufacturer_color_name(Some("Other Brand"), "PLA Galaxy Black", "PLA"), "");
+        assert_eq!(manufacturer_color_name(None, "PLA Galaxy Black", "PLA"), "");
     }
 }

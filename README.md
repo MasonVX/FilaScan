@@ -33,11 +33,12 @@ official OpenPrintTag sample for specification revision `7e09cc3`; physical tag
 testing is still required.
 
 OpenPrintTag defines exact color values but no separate marketing color-name
-field. FilaScan uses the material-name suffix when it contains a product variant
-(for example, `PLA Galaxy Black` becomes `Galaxy Black`). Otherwise it displays
-a localized approximate color family calculated from the RGB value. The exact
-hexadecimal RGBA value remains visible in the color preview. Bambu-specific
-color codes are shown only for Bambu tags.
+field. For Prusament tags, FilaScan uses the manufacturer's material-name suffix
+when it contains a product variant (for example, `PLA Galaxy Black` becomes
+`Galaxy Black`). Other manufacturers use a localized approximate color family
+calculated from the RGB value until a manufacturer-specific resolver is added.
+The exact hexadecimal RGBA value remains visible in the color preview.
+Bambu-specific color codes are shown only for Bambu tags.
 Long manufacturer and material names wrap onto two lines on the device display.
 
 For Bambu tags, the device display shows:
