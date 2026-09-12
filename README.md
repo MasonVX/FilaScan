@@ -129,16 +129,13 @@ fixed and is not exposed as a configuration setting.
 
 ### FilaMan integration
 
-FilaScan can add a recognized spool to a separate
-[FilaMan](https://github.com/Fire-Devils/filaman-system) instance. The 16-byte
-Bambu Tray UID is stored as FilaMan's unique `external_id`. The short NFC Tag
-UID is not included in any FilaMan request.
+FilaScan can add a recognized Bambu or OpenPrintTag spool to a separate
+[FilaMan](https://github.com/Fire-Devils/filaman-system) instance. Bambu uses
+`bambulab:<TRAY_UUID>` as its unique FilaMan identity; OpenPrintTag uses
+`openprinttag:<instance-uuid>`. The physical NFC Tag UID is not included in any
+FilaMan request.
 
-FilaMan import currently applies only to Bambu tags. OpenPrintTag spools are
-displayed locally but are not sent to FilaMan until a matching plugin API
-contract is implemented.
-
-After a scan, FilaScan first checks whether that Tray UID is already registered.
+After a scan, FilaScan first checks whether that source identity is already registered.
 For an existing spool, its current location appears as a button in the spool
 view. Pressing it opens the location selector; choosing another regular
 location moves the existing spool and records the change through the FilaMan
@@ -152,7 +149,8 @@ leaves FilaMan unchanged.
 
 The confirmed import sends the decoded spool data and selected `location_id` in
 one authenticated request to the FilaScan integration plugin at
-`POST /api/v1/devices/filascan/import-spool?type=bambu`. The plugin owns the
+`POST /api/v1/devices/filascan/import-spool`, using `type=bambu` or
+`type=openprinttag`. The plugin owns the
 transactional, idempotent creation or resolution of the manufacturer, colors,
 filament and spool.
 

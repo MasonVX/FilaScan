@@ -22,7 +22,10 @@ use framework::{framework::Framework, utils::SpawnerHeapExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{bambu_spool::BambuSpool, diagnostics::LogBuffer};
+use crate::{
+    diagnostics::LogBuffer,
+    spool::{FilamentSpool, ProductReference, SpoolSource},
+};
 
 // The SD card is mounted without long-file-name support. Keep every path
 // component within the FAT 8.3 limits, including the three-character suffix.
@@ -261,12 +264,7 @@ impl FilaManService {
             .map_err(|_| "Could not start FilaMan settings save task".to_string())
     }
 
-    pub fn update_connection_settings(
-        self: &Rc<Self>,
-        enabled: bool,
-        base_url: String,
-        ca_certificate_pem: String,
-    ) -> Result<(), String> {
+    pub fn update_connection_settings(self: &Rc<Self>, enabled: bool, base_url: String, ca_certificate_pem: String) -> Result<(), String> {
         let device_token = self.settings.borrow().device_token.clone();
         self.set_settings(FilaManSettings {
             enabled,
@@ -398,18 +396,12 @@ impl FilaManService {
                         *service.device_name.borrow_mut() = None;
                         match service.persist_settings().await {
                             Ok(()) => {
-                                *service.state.borrow_mut() =
-                                    "Device registered; authorize it in the FilaScan import plugin".to_string();
-                                service.log_info(
-                                    "FilaMan device registration succeeded; device token stored on SD card",
-                                );
+                                *service.state.borrow_mut() = "Device registered; authorize it in the FilaScan import plugin".to_string();
+                                service.log_info("FilaMan device registration succeeded; device token stored on SD card");
                             }
                             Err(error) => {
-                                *service.state.borrow_mut() =
-                                    "Device registered, but the token could not be stored".to_string();
-                                service.log_warn(&format!(
-                                    "FilaMan issued a device token, but it could not be persisted: {error}"
-                                ));
+                                *service.state.borrow_mut() = "Device registered, but the token could not be stored".to_string();
+                                service.log_warn(&format!("FilaMan issued a device token, but it could not be persisted: {error}"));
                             }
                         }
                     }
@@ -428,26 +420,29 @@ impl FilaManService {
         Ok(())
     }
 
-    pub async fn prepare_spool(&self, spool: &BambuSpool) -> Result<SpoolRegistration, String> {
+    pub async fn prepare_spool(&self, spool: &FilamentSpool) -> Result<SpoolRegistration, String> {
         if !self.import_enabled() {
             return Err("FilaMan location-assisted import is disabled".to_string());
         }
-        if let Err(error) = validate_bambu_spool(spool) {
+        if let Err(error) = validate_spool(spool) {
             return Err(error.to_string());
         }
         if self.busy.replace(true) {
             return Err("Another FilaMan request is already running".to_string());
         }
 
-        self.log_info(&format!("FilaMan: checking registration and locations for Tray UID {}", spool.tray_uid));
+        self.log_info(&format!(
+            "FilaMan: checking registration and locations for external ID {}",
+            spool.external_id
+        ));
         let result = self.prepare_spool_inner(spool).await;
         self.busy.set(false);
         match &result {
             Ok(SpoolRegistration::Existing { spool_id, location_name, .. }) => {
                 *self.state.borrow_mut() = format!("Spool {spool_id} already registered");
                 self.log_info(&format!(
-                    "FilaMan: Tray UID {} is already registered as spool {} at {}",
-                    spool.tray_uid,
+                    "FilaMan: external ID {} is already registered as spool {} at {}",
+                    spool.external_id,
                     spool_id,
                     location_name.as_deref().unwrap_or("no location")
                 ));
@@ -455,24 +450,24 @@ impl FilaManService {
             Ok(SpoolRegistration::New { locations }) => {
                 *self.state.borrow_mut() = format!("Choose one of {} locations", locations.len());
                 self.log_info(&format!(
-                    "FilaMan: Tray UID {} is new; {} eligible locations available",
-                    spool.tray_uid,
+                    "FilaMan: external ID {} is new; {} eligible locations available",
+                    spool.external_id,
                     locations.len()
                 ));
             }
             Err(error) => {
                 *self.state.borrow_mut() = format!("Lookup failed: {error}");
-                self.log_warn(&format!("FilaMan lookup failed for Tray UID {}: {error}", spool.tray_uid));
+                self.log_warn(&format!("FilaMan lookup failed for external ID {}: {error}", spool.external_id));
             }
         }
         result
     }
 
-    pub async fn import_spool_at(&self, spool: &BambuSpool, location_id: u64) -> Result<ImportOutcome, String> {
+    pub async fn import_spool_at(&self, spool: &FilamentSpool, location_id: u64) -> Result<ImportOutcome, String> {
         if !self.import_enabled() {
             return Err("FilaMan location-assisted import is disabled".to_string());
         }
-        if let Err(error) = validate_bambu_spool(spool) {
+        if let Err(error) = validate_spool(spool) {
             return Err(error.to_string());
         }
         if location_id == 0 {
@@ -482,7 +477,10 @@ impl FilaManService {
             return Err("Another FilaMan request is already running".to_string());
         }
 
-        self.log_info(&format!("FilaMan: importing Tray UID {} into location {}", spool.tray_uid, location_id));
+        self.log_info(&format!(
+            "FilaMan: importing external ID {} into location {}",
+            spool.external_id, location_id
+        ));
         let result = self.import_spool_inner(spool, location_id).await;
         self.busy.set(false);
         match &result {
@@ -502,8 +500,8 @@ impl FilaManService {
             Err(error) => {
                 *self.state.borrow_mut() = format!("Import failed: {error}");
                 self.log_warn(&format!(
-                    "FilaMan import failed for Tray UID {} at location {}: {error}",
-                    spool.tray_uid, location_id
+                    "FilaMan import failed for external ID {} at location {}: {error}",
+                    spool.external_id, location_id
                 ));
             }
         }
@@ -588,8 +586,8 @@ impl FilaManService {
             .map_err(|error| format!("SD write failed: {error:?}"))
     }
 
-    async fn prepare_spool_inner(&self, spool: &BambuSpool) -> Result<SpoolRegistration, String> {
-        if let Some(existing) = self.find_spool(&spool.tray_uid).await? {
+    async fn prepare_spool_inner(&self, spool: &FilamentSpool) -> Result<SpoolRegistration, String> {
+        if let Some(existing) = self.find_spool(spool).await? {
             let location_name = match existing.location_id {
                 Some(location_id) => Some(self.load_location_name(location_id).await?),
                 None => None,
@@ -606,8 +604,8 @@ impl FilaManService {
         })
     }
 
-    async fn find_spool(&self, tray_uid: &str) -> Result<Option<ExistingSpool>, String> {
-        let canonical_id = format!("bambulab:{}", tray_uid.to_ascii_uppercase());
+    async fn find_spool(&self, spool: &FilamentSpool) -> Result<Option<ExistingSpool>, String> {
+        let canonical_id = canonical_external_id(spool);
         for page in 1..=100 {
             let response = self.api_get(&format!("/spools?page={page}&page_size=50&include_archived=false")).await?;
             let items = response
@@ -617,7 +615,7 @@ impl FilaManService {
             for item in items {
                 let external_id = item.get("external_id").and_then(Value::as_str);
                 if external_id
-                    .map(|value| value.eq_ignore_ascii_case(&canonical_id) || value.eq_ignore_ascii_case(tray_uid))
+                    .map(|value| value.eq_ignore_ascii_case(&canonical_id) || value.eq_ignore_ascii_case(&spool.external_id))
                     .unwrap_or(false)
                 {
                     let id = item
@@ -682,39 +680,18 @@ impl FilaManService {
         Err("FilaMan location list exceeds 4000 entries".to_string())
     }
 
-    async fn import_spool_inner(&self, spool: &BambuSpool, location_id: u64) -> Result<ImportResponse, String> {
-        let payload = json!({
-            "external_id": spool.tray_uid,
-            "manufacturer": "Bambu Lab",
-            "material_id": spool.material_id,
-            "variant_id": spool.variant_id,
-            "filament_type": spool.filament_type,
-            "detailed_filament_type": spool.detailed_filament_type,
-            "official_material_name": spool.official_material_name,
-            "color_name": spool.color_name,
-            "bambu_color_code": optional_string(&spool.bambu_color_code),
-            "primary_rgba": rgba_hex(spool.primary_rgba),
-            "secondary_rgba": spool.secondary_rgba.map(rgba_hex),
-            "location_id": location_id,
-            "weight_g": spool.weight_g,
-            "diameter_mm": spool.diameter_mm,
-            "drying_temperature_c": optional_u16(spool.drying_temperature_c),
-            "drying_time_h": optional_u16(spool.drying_time_h),
-            "bed_temperature_c": optional_u16(spool.bed_temperature_c),
-            "nozzle_temperature_min_c": optional_u16(spool.nozzle_temperature_min_c),
-            "nozzle_temperature_max_c": optional_u16(spool.nozzle_temperature_max_c),
-            "spool_width_mm": optional_f32(spool.spool_width_mm),
-            "filament_length_m": optional_u16(spool.filament_length_m),
-            "production_date": optional_string(&spool.production_date)
-        });
-        let response = self.api_post("/devices/filascan/import-spool?type=bambu", &payload).await?;
+    async fn import_spool_inner(&self, spool: &FilamentSpool, location_id: u64) -> Result<ImportResponse, String> {
+        let (spool_type, payload) = import_payload(spool, location_id)?;
+        let response = self
+            .api_post(&format!("/devices/filascan/import-spool?type={spool_type}"), &payload)
+            .await?;
         let result: ImportResponse = serde_json::from_value(response).map_err(|error| format!("invalid FilaMan plugin import response: {error}"))?;
         if !matches!(result.status.as_str(), "created" | "existing" | "updated") {
             return Err(format!("FilaMan plugin returned unsupported import status '{}'", result.status));
         }
-        let canonical_id = format!("bambulab:{}", spool.tray_uid.to_ascii_uppercase());
-        if !result.external_id.eq_ignore_ascii_case(&canonical_id) && !result.external_id.eq_ignore_ascii_case(&spool.tray_uid) {
-            return Err("FilaMan plugin response external_id does not match the requested Tray UID".to_string());
+        let canonical_id = canonical_external_id(spool);
+        if !result.external_id.eq_ignore_ascii_case(&canonical_id) && !result.external_id.eq_ignore_ascii_case(&spool.external_id) {
+            return Err("FilaMan plugin response external_id does not match the requested spool identity".to_string());
         }
         Ok(result)
     }
@@ -826,8 +803,7 @@ impl FilaManService {
         if endpoint.secure {
             let mut tcp_buffers = Box::new(TcpBuffers::<1, 2048, 8192>::new());
             let tcp = Tcp::new(stack, &mut *tcp_buffers);
-            let ca_pem = CString::new(settings.ca_certificate_pem.as_str())
-                .map_err(|_| "FilaMan CA certificate contains a null byte".to_string())?;
+            let ca_pem = CString::new(settings.ca_certificate_pem.as_str()).map_err(|_| "FilaMan CA certificate contains a null byte".to_string())?;
             let ca_chain = X509::pem(ca_pem.as_bytes_with_nul()).map_err(|error| format!("Invalid FilaMan CA certificate: {error:?}"))?;
             let certificates = Certificates {
                 ca_chain: Some(ca_chain),
@@ -979,9 +955,7 @@ fn validate_device_token(token: &str) -> Result<(), String> {
     let secret = parts.next();
     if prefix != Some("dev")
         || device_id.and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).is_none()
-        || secret.is_none_or(|value| {
-            value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-        })
+        || secret.is_none_or(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'))
     {
         return Err("FilaMan returned an invalid device token".to_string());
     }
@@ -1058,27 +1032,133 @@ fn rgba_hex(rgba: [u8; 4]) -> String {
     format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3])
 }
 
-fn validate_bambu_spool(spool: &BambuSpool) -> Result<(), &'static str> {
-    if spool.tray_uid.len() != 32 || !spool.tray_uid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("Bambu Tray UID is missing or invalid");
+fn validate_spool(spool: &FilamentSpool) -> Result<(), &'static str> {
+    if spool.external_id.is_empty() || spool.material_type.is_empty() || spool.material_name.is_empty() {
+        return Err("required decoded filament metadata is missing");
     }
-    if spool.material_id.is_empty()
-        || spool.variant_id.is_empty()
-        || spool.filament_type.is_empty()
-        || spool.detailed_filament_type.is_empty()
-        || spool.official_material_name.is_empty()
-        || spool.color_name.is_empty()
-    {
-        return Err("required decoded Bambu filament metadata is missing");
-    }
-    if spool.weight_g == 0 || !spool.diameter_mm.is_finite() || spool.diameter_mm <= 0.0 {
-        return Err("required Bambu spool weight or diameter is invalid");
+    match &spool.product_reference {
+        ProductReference::Bambu {
+            material_id,
+            variant_id,
+            detailed_filament_type,
+            color_name,
+            ..
+        } => {
+            if spool.external_id.len() != 32 || !spool.external_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err("Bambu Tray UID is missing or invalid");
+            }
+            if material_id.is_empty() || variant_id.is_empty() || detailed_filament_type.is_empty() || color_name.is_empty() {
+                return Err("required decoded Bambu filament metadata is missing");
+            }
+        }
+        ProductReference::OpenPrintTag { .. } => {
+            if spool.external_id.len() != 36 {
+                return Err("OpenPrintTag instance UUID is missing or invalid");
+            }
+        }
     }
     Ok(())
 }
 
-fn optional_u16(value: u16) -> Option<u16> {
-    (value != 0).then_some(value)
+fn canonical_external_id(spool: &FilamentSpool) -> String {
+    match spool.source {
+        SpoolSource::BambuLab => format!("bambulab:{}", spool.external_id.to_ascii_uppercase()),
+        SpoolSource::OpenPrintTag => format!("openprinttag:{}", spool.external_id.to_ascii_lowercase()),
+    }
+}
+
+fn import_payload(spool: &FilamentSpool, location_id: u64) -> Result<(&'static str, Value), String> {
+    match &spool.product_reference {
+        ProductReference::Bambu {
+            color_code,
+            color_name,
+            material_id,
+            variant_id,
+            detailed_filament_type,
+            spool_width_mm,
+            production_date,
+        } => Ok((
+            "bambu",
+            json!({
+                "external_id": spool.external_id,
+                "manufacturer": "Bambu Lab",
+                "material_id": material_id,
+                "variant_id": variant_id,
+                "filament_type": spool.material_type,
+                "detailed_filament_type": detailed_filament_type,
+                "official_material_name": spool.material_name,
+                "color_name": color_name,
+                "bambu_color_code": optional_string(color_code),
+                "primary_rgba": rgba_hex(spool.primary_color()),
+                "secondary_rgba": spool.colors.get(1).copied().map(rgba_hex),
+                "location_id": location_id,
+                "weight_g": spool.nominal_weight_g,
+                "diameter_mm": spool.diameter_mm,
+                "drying_temperature_c": spool.drying_temperature_c,
+                "drying_time_h": spool.drying_time_h,
+                "bed_temperature_c": spool.bed_min_c,
+                "nozzle_temperature_min_c": spool.nozzle_min_c,
+                "nozzle_temperature_max_c": spool.nozzle_max_c,
+                "spool_width_mm": optional_f32(*spool_width_mm),
+                "filament_length_m": spool.length_m,
+                "production_date": optional_string(production_date)
+            }),
+        )),
+        ProductReference::OpenPrintTag {
+            brand_uuid,
+            material_uuid,
+            gtin,
+            ndef_uri,
+            ..
+        } => {
+            let manufacturer = spool.brand.as_deref().unwrap_or("OpenPrintTag");
+            let color_name = if spool.color_name.is_empty() {
+                rgba_hex(spool.primary_color())
+            } else {
+                spool.color_name.clone()
+            };
+            Ok((
+                "openprinttag",
+                json!({
+                    "external_id": spool.external_id,
+                    "manufacturer": manufacturer,
+                    "material_type": spool.material_type,
+                    "material_name": spool.material_name,
+                    "color_name": color_name,
+                    "primary_rgba": rgba_hex(spool.primary_color()),
+                    "secondary_rgba": spool.colors.get(1).copied().map(rgba_hex),
+                    "product_url": ndef_uri,
+                    "location_id": location_id,
+                    "weight_g": spool.nominal_weight_g,
+                    "remaining_weight_g": spool.remaining_weight_g,
+                    "empty_container_weight_g": spool.empty_container_weight_g,
+                    "diameter_mm": spool.diameter_mm,
+                    "filament_length_m": spool.length_m,
+                    "nozzle_temperature_min_c": spool.nozzle_min_c,
+                    "nozzle_temperature_max_c": spool.nozzle_max_c,
+                    "bed_temperature_min_c": spool.bed_min_c,
+                    "bed_temperature_max_c": spool.bed_max_c,
+                    "drying_temperature_c": spool.drying_temperature_c,
+                    "drying_time_h": spool.drying_time_h,
+                    "brand_uuid": brand_uuid.map(format_uuid),
+                    "material_uuid": material_uuid.map(format_uuid),
+                    "gtin": gtin
+                }),
+            ))
+        }
+    }
+}
+
+fn format_uuid(uuid: [u8; 16]) -> String {
+    let encoded = hex::encode(uuid);
+    format!(
+        "{}-{}-{}-{}-{}",
+        &encoded[0..8],
+        &encoded[8..12],
+        &encoded[12..16],
+        &encoded[16..20],
+        &encoded[20..32]
+    )
 }
 
 fn optional_f32(value: f32) -> Option<f32> {

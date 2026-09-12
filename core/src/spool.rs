@@ -12,7 +12,15 @@ pub enum SpoolSource {
 
 #[derive(Debug, Clone)]
 pub enum ProductReference {
-    Bambu { color_code: String },
+    Bambu {
+        color_code: String,
+        color_name: String,
+        material_id: String,
+        variant_id: String,
+        detailed_filament_type: String,
+        spool_width_mm: f32,
+        production_date: String,
+    },
     OpenPrintTag {
         brand_uuid: Option<[u8; 16]>,
         material_uuid: Option<[u8; 16]>,
@@ -80,7 +88,15 @@ impl FilamentSpool {
                 format!("Tag type {}", spool.detailed_filament_type),
                 format!("Spool width {:.2} mm", spool.spool_width_mm),
             ],
-            product_reference: ProductReference::Bambu { color_code: spool.bambu_color_code.clone() },
+            product_reference: ProductReference::Bambu {
+                color_code: spool.bambu_color_code.clone(),
+                color_name: spool.color_name.clone(),
+                material_id: spool.material_id.clone(),
+                variant_id: spool.variant_id.clone(),
+                detailed_filament_type: spool.detailed_filament_type.clone(),
+                spool_width_mm: spool.spool_width_mm,
+                production_date: spool.production_date.clone(),
+            },
         }
     }
 
@@ -187,7 +203,10 @@ mod tests {
     #[test]
     fn uses_prusament_material_suffix_as_color_name() {
         assert_eq!(manufacturer_color_name(Some("Prusament"), "PLA Galaxy Black", "PLA"), "Galaxy Black");
-        assert_eq!(manufacturer_color_name(Some("Prusa"), "PETG Prusa Galaxy Black", "PETG"), "Prusa Galaxy Black");
+        assert_eq!(
+            manufacturer_color_name(Some("Prusa"), "PETG Prusa Galaxy Black", "PETG"),
+            "Prusa Galaxy Black"
+        );
         assert_eq!(manufacturer_color_name(Some("Prusament"), "PETG", "PETG"), "");
     }
 
