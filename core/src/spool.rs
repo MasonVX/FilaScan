@@ -107,10 +107,7 @@ impl FilamentSpool {
         if let Some(location) = &tag.storage_location {
             additional_details.push(format!("Tag location {location}"));
         }
-        let color_name = colors
-            .first()
-            .map(|color| format!("RGB #{}", hex::encode_upper(color)))
-            .unwrap_or_default();
+        let color_name = product_variant_name(&material_name, &material_type);
         Self {
             source: SpoolSource::OpenPrintTag,
             external_id,
@@ -167,4 +164,24 @@ fn format_uuid(uuid: [u8; 16]) -> String {
         &encoded[16..20],
         &encoded[20..32]
     )
+}
+
+fn product_variant_name(material_name: &str, material_type: &str) -> String {
+    material_name
+        .strip_prefix(material_type)
+        .map(|suffix| suffix.trim_start_matches([' ', '-', '·', '/']).trim())
+        .filter(|suffix| !suffix.is_empty())
+        .map(String::from)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::product_variant_name;
+
+    #[test]
+    fn uses_openprinttag_material_suffix_as_product_variant() {
+        assert_eq!(product_variant_name("PLA Galaxy Black", "PLA"), "Galaxy Black");
+        assert_eq!(product_variant_name("PETG", "PETG"), "");
+    }
 }

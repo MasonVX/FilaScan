@@ -134,20 +134,20 @@ component SpoolView inherits Rectangle {
                 spacing: 3px;
 
                 Text {
+                    height: 56px;
                     color: #72d6ff;
-                    font-size: 27px;
+                    font-size: 23px;
                     font-weight: 700;
-                    overflow: elide;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
                     text: ReaderState.material-name;
                 }
                 Text { color: #a9b8c7; font-size: 14px; overflow: elide; text: ReaderState.material-detail; }
                 Text { color: white; font-size: 23px; font-weight: 600; overflow: elide; text: ReaderState.color-name; }
-                Text {
+                if ReaderState.show-bambu-color-code: Text {
                     color: #a9b8c7;
                     font-size: 14px;
-                    text: ReaderState.bambu-color-code == ""
-                        ? (ReaderState.german ? "Bambu-Farbcode nicht verfügbar" : "Bambu color code unavailable")
-                        : (ReaderState.german ? "Bambu-Farbe " : "Bambu color ") + ReaderState.bambu-color-code;
+                    text: (ReaderState.german ? "Bambu-Farbe " : "Bambu color ") + ReaderState.bambu-color-code;
                 }
 
                 Rectangle { height: 1px; background: #344250; }

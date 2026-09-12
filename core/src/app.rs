@@ -23,7 +23,7 @@ use crate::{
     filaman::{ArchiveOutcome, FilaManLocation, FilaManService, ImportOutcome, MoveOutcome, SpoolRegistration},
     image_loader,
     localization::{self, Language, LocalizationService},
-    spool::{FilamentSpool, ProductReference},
+    spool::{FilamentSpool, ProductReference, SpoolSource},
 };
 
 slint::include_modules!();
@@ -591,13 +591,19 @@ impl ReaderController {
 
         state.set_material_name(spool.display_name().into());
         state.set_material_detail(format!("{} · {}", spool.material_type, spool.source_detail).into());
-        state.set_color_name(spool.color_name.clone().into());
         state.set_color_code(format!("#{}", hex::encode_upper(spool.primary_color())).into());
         let bambu_color_code = match &spool.product_reference {
             ProductReference::Bambu { color_code } => color_code.as_str(),
             ProductReference::OpenPrintTag { .. } => "",
         };
         state.set_bambu_color_code(bambu_color_code.into());
+        state.set_show_bambu_color_code(spool.source == SpoolSource::BambuLab && !bambu_color_code.is_empty());
+        let color_name = if spool.color_name.is_empty() {
+            approximate_color_name(spool.primary_color(), self.language())
+        } else {
+            spool.color_name.clone()
+        };
+        state.set_color_name(color_name.into());
         state.set_primary_color(to_slint_color(spool.primary_color()));
         state.set_has_secondary_color(spool.colors.len() > 1);
         if let Some(color) = spool.colors.get(1) {
@@ -951,4 +957,61 @@ impl FrameworkObserver for ReaderController {
 
 fn to_slint_color([red, green, blue, alpha]: [u8; 4]) -> Color {
     Color::from_argb_u8(alpha, red, green, blue)
+}
+
+fn approximate_color_name([red, green, blue, alpha]: [u8; 4], language: Language) -> String {
+    const PALETTE: [([u8; 3], &str, &str); 26] = [
+        ([0, 0, 0], "Black", "Schwarz"),
+        ([54, 69, 79], "Charcoal", "Anthrazit"),
+        ([75, 75, 75], "Dark gray", "Dunkelgrau"),
+        ([128, 128, 128], "Gray", "Grau"),
+        ([195, 195, 195], "Light gray", "Hellgrau"),
+        ([255, 255, 255], "White", "Weiß"),
+        ([220, 35, 45], "Red", "Rot"),
+        ([125, 20, 25], "Dark red", "Dunkelrot"),
+        ([255, 125, 20], "Orange", "Orange"),
+        ([120, 70, 35], "Brown", "Braun"),
+        ([225, 198, 153], "Beige", "Beige"),
+        ([245, 215, 40], "Yellow", "Gelb"),
+        ([212, 175, 55], "Gold", "Gold"),
+        ([130, 230, 35], "Lime", "Limettengrün"),
+        ([30, 160, 70], "Green", "Grün"),
+        ([0, 90, 45], "Dark green", "Dunkelgrün"),
+        ([128, 128, 25], "Olive", "Olivgrün"),
+        ([55, 185, 170], "Turquoise", "Türkis"),
+        ([0, 190, 220], "Cyan", "Cyan"),
+        ([100, 180, 240], "Light blue", "Hellblau"),
+        ([40, 90, 210], "Blue", "Blau"),
+        ([20, 40, 100], "Navy", "Marineblau"),
+        ([105, 55, 150], "Purple", "Purpur"),
+        ([150, 70, 205], "Violet", "Violett"),
+        ([220, 40, 180], "Magenta", "Magenta"),
+        ([240, 140, 180], "Pink", "Rosa"),
+    ];
+
+    let mut closest = PALETTE[0];
+    let mut closest_distance = u64::MAX;
+    for entry in PALETTE {
+        let red_delta = red as i32 - entry.0[0] as i32;
+        let green_delta = green as i32 - entry.0[1] as i32;
+        let blue_delta = blue as i32 - entry.0[2] as i32;
+        let distance = (3 * red_delta * red_delta + 4 * green_delta * green_delta + 2 * blue_delta * blue_delta) as u64;
+        if distance < closest_distance {
+            closest = entry;
+            closest_distance = distance;
+        }
+    }
+
+    let name = if language == Language::German { closest.2 } else { closest.1 };
+    if alpha < 64 {
+        String::from(if language == Language::German { "Transparent" } else { "Transparent" })
+    } else if alpha < 230 {
+        if language == Language::German {
+            format!("Transparentes {name}")
+        } else {
+            format!("Translucent {name}")
+        }
+    } else {
+        String::from(name)
+    }
 }
