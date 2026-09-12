@@ -1104,13 +1104,7 @@ fn import_payload(spool: &FilamentSpool, location_id: u64) -> Result<(&'static s
                 "production_date": optional_string(production_date)
             }),
         )),
-        ProductReference::OpenPrintTag {
-            brand_uuid,
-            material_uuid,
-            gtin,
-            ndef_uri,
-            ..
-        } => {
+        ProductReference::OpenPrintTag { ndef_uri, .. } => {
             let manufacturer = spool.brand.as_deref().unwrap_or("OpenPrintTag");
             let color_name = if spool.color_name.is_empty() {
                 rgba_hex(spool.primary_color())
@@ -1131,34 +1125,11 @@ fn import_payload(spool: &FilamentSpool, location_id: u64) -> Result<(&'static s
                     "location_id": location_id,
                     "weight_g": spool.nominal_weight_g,
                     "remaining_weight_g": spool.remaining_weight_g,
-                    "empty_container_weight_g": spool.empty_container_weight_g,
                     "diameter_mm": spool.diameter_mm,
-                    "filament_length_m": spool.length_m,
-                    "nozzle_temperature_min_c": spool.nozzle_min_c,
-                    "nozzle_temperature_max_c": spool.nozzle_max_c,
-                    "bed_temperature_min_c": spool.bed_min_c,
-                    "bed_temperature_max_c": spool.bed_max_c,
-                    "drying_temperature_c": spool.drying_temperature_c,
-                    "drying_time_h": spool.drying_time_h,
-                    "brand_uuid": brand_uuid.map(format_uuid),
-                    "material_uuid": material_uuid.map(format_uuid),
-                    "gtin": gtin
                 }),
             ))
         }
     }
-}
-
-fn format_uuid(uuid: [u8; 16]) -> String {
-    let encoded = hex::encode(uuid);
-    format!(
-        "{}-{}-{}-{}-{}",
-        &encoded[0..8],
-        &encoded[8..12],
-        &encoded[12..16],
-        &encoded[16..20],
-        &encoded[20..32]
-    )
 }
 
 fn optional_f32(value: f32) -> Option<f32> {
