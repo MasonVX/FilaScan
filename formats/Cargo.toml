@@ -1,0 +1,14 @@
+[package]
+name = "filascan-formats"
+version = "0.1.0"
+edition = "2024"
+license-file = "../LICENSE.md"
+rust-version = "1.90"
+
+[features]
+default = []
+std = ["minicbor/std"]
+
+[dependencies]
+minicbor = { version = "2.3.0", default-features = false, features = ["alloc", "half"] }
+sha1 = { version = "0.10.7", default-features = false }

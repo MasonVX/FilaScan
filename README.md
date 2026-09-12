@@ -1,9 +1,8 @@
 # FilaScan
 
-FilaScan is firmware for a standalone Bambu Lab filament spool reader. It runs
+FilaScan is firmware for a standalone filament spool reader. It runs
 on a WT32-SC01 Plus with a PN532 or PN5180 RFID reader and shows the spool
-information on the integrated display immediately after a factory tag is
-scanned.
+information on the integrated display immediately after a supported tag is scanned.
 
 FilaScan is derived from the original
 [yanshay/SpoolEase](https://github.com/yanshay/SpoolEase) implementation through
@@ -19,10 +18,21 @@ endorsed by Bambu Lab or the SpoolEase maintainers.
 
 ## Current functionality
 
-FilaScan reads Bambu Lab factory MIFARE Classic 1K tags. It does not modify the
-tag.
+FilaScan reads Bambu Lab factory MIFARE Classic 1K tags. With a PN5180 it also
+reads OpenPrintTag NFC-V tags containing an NDEF record with the
+`application/vnd.openprinttag` MIME type. Tags are read-only and are never
+modified. The PN532 does not support the ISO/IEC 15693 protocol required by
+OpenPrintTag.
 
-The device display shows:
+OpenPrintTag data is decoded independently from the Bambu format and converted
+to the same internal filament model. The display uses the brand, material,
+colors, weights, dimensions, temperature ranges and drying parameters that are
+present on the tag. Unknown CBOR fields and additional NDEF records are skipped
+without rejecting an otherwise valid tag. The parser is tested against the
+official OpenPrintTag sample for specification revision `7e09cc3`; physical tag
+testing is still required.
+
+For Bambu tags, the device display shows:
 
 - official Bambu material/product name
 - filament type, material ID and variant ID
@@ -45,8 +55,9 @@ fallback when a translation is missing. Bambu product and material names such
 as `PLA Matte` remain unchanged. Technical diagnostic logs remain in English.
 
 The web interface includes a live diagnostic log for RFID detection, retries,
-read failures and successful spool mappings. Every successful scan prints all
-decoded fields and a hexadecimal dump of every payload block read from the tag.
+read failures and successful spool mappings. Every successful scan prints the
+relevant decoded fields. Bambu scans also include a hexadecimal dump of every
+payload block read from the tag.
 Authentication keys and Wi-Fi credentials are not logged. The in-memory log
 retains the most recent 120 lines and is cleared when the device restarts.
 
@@ -88,12 +99,22 @@ downloaded image is kept only for the current display session and the next scan
 must fetch it again. Product images remain Bambu Lab content and are retrieved
 at runtime; they are not included in the firmware image.
 
+Product enrichment is separate from tag decoding. Bambu product images use the
+existing Bambu resolver. OpenPrintTag retains its brand UUID, material UUID,
+GTIN and brand name so manufacturer-specific resolvers, such as a future Prusa
+image provider, can be added without changing the RFID protocol or OpenPrintTag
+parser. No OpenPrintTag manufacturer image provider is enabled yet.
+
 ### FilaMan integration
 
 FilaScan can add a recognized spool to a separate
 [FilaMan](https://github.com/Fire-Devils/filaman-system) instance. The 16-byte
 Bambu Tray UID is stored as FilaMan's unique `external_id`. The short NFC Tag
 UID is not included in any FilaMan request.
+
+FilaMan import currently applies only to Bambu tags. OpenPrintTag spools are
+displayed locally but are not sent to FilaMan until a matching plugin API
+contract is implemented.
 
 After a scan, FilaScan first checks whether that Tray UID is already registered.
 For an existing spool, its current location appears as a button in the spool
@@ -305,6 +326,7 @@ FilaScan version in `core/Cargo.toml` must match the numeric part of the tag.
 | Path | Purpose |
 |---|---|
 | `core/src/bambu_spool.rs` | Bambu tag parsing and local product mapping |
+| `core/src/spool.rs` | Manufacturer-neutral filament model and product enrichment identity |
 | `core/src/catalog.rs` | BambuStudio catalog download, validation and SD cache |
 | `core/src/filaman.rs` | FilaMan plugin HTTP(S) client and Bambu import payload |
 | `core/src/image_loader.rs` | Restricted Bambu Store lookup, HTTPS image download and JPEG decoding |
@@ -314,9 +336,10 @@ FilaScan version in `core/Cargo.toml` must match the numeric part of the tag.
 | `core/static/` | Protected Wi-Fi, catalog and FilaMan configuration |
 | `shared/src/reader.rs` | Reader selection and hardware-neutral event interface |
 | `shared/src/pn532_reader.rs` | PN532 detection, ISO-A selection and read recovery |
-| `shared/src/pn5180.rs` | PN5180 SPI, BUSY, RF and MIFARE Classic driver |
-| `shared/src/pn5180_reader.rs` | PN5180 scan loop and Bambu payload reads |
+| `shared/src/pn5180.rs` | PN5180 SPI, BUSY, ISO-A/MIFARE Classic and NFC-V driver |
+| `shared/src/pn5180_reader.rs` | PN5180 protocol scan loop and payload reads |
 | `shared/src/nfc.rs` | Shared Bambu key derivation and payload block definition |
+| `formats/` | Hardware-independent, no-std OpenPrintTag NDEF/CBOR decoder and tests |
 | `scripts/` | macOS bootstrap, firmware build and flashing |
 
 ## AI-assisted development
@@ -339,6 +362,7 @@ and hardware testing process as other contributions.
 - [NXP PN532](https://www.nxp.com/products/rfid-nfc/nfc-hf/nfc-readers/standard-performance-mifare-and-ntag-frontend:PN5321A3HN)
 - [NXP PN5180](https://www.nxp.com/products/PN5180)
 - [NXP AN12650: Using the PN5180 without library](https://www.nxp.com/docs/en/application-note/AN12650.pdf)
+- [OpenPrintTag specification](https://github.com/OpenPrintTag/openprinttag-specification)
 - [Spoolman](https://github.com/Donkie/Spoolman)
 
 ## License

@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 use log::{error, info, warn};
 
 use crate::{
-    reader::{ReaderEvent, ReaderKind, RfidReader},
+    reader::{ReaderEvent, ReaderKind, RfidReader, TagFormat, TagIdentity, TagPayload, TagProtocol},
     nfc,
     pn532_ext::Esp32TimerAsync,
 };
@@ -110,6 +110,7 @@ pub async fn run(
         let uid = response[6..6 + uid_len].to_vec();
         let atqa = [response[2], response[3]];
         let sak = response[4];
+        let tag = TagIdentity { uid: uid.clone(), protocol: TagProtocol::Iso14443A { atqa, sak } };
 
         // A continuously present tag is returned repeatedly by InList. Ignore
         // it while responses stay less than 500 ms apart. A later response is
@@ -126,9 +127,8 @@ pub async fn run(
 
         if !nfc::is_mifare_classic_1k(response) {
             reader.borrow().notify_event(ReaderEvent::UnsupportedTag {
-                tag_uid: uid.clone(),
-                atqa,
-                sak,
+                tag,
+                detail: "expected MIFARE Classic 1K",
             });
             completed_uid = Some(uid);
             completed_uid_last_seen = embassy_time::Instant::now();
@@ -140,9 +140,8 @@ pub async fn run(
             pending_blocks.clear();
             pending_attempt = 0;
             reader.borrow().notify_event(ReaderEvent::Reading {
-                tag_uid: uid.clone(),
-                atqa,
-                sak,
+                tag: tag.clone(),
+                format: TagFormat::BambuLab,
             });
         }
 
@@ -156,9 +155,9 @@ pub async fn run(
         .await
         {
             Ok(()) => {
-                reader.borrow().notify_event(ReaderEvent::Spool {
-                    tag_uid: uid.clone(),
-                    blocks: core::mem::take(&mut pending_blocks),
+                reader.borrow().notify_event(ReaderEvent::TagRead {
+                    tag,
+                    payload: TagPayload::BambuClassic { blocks: core::mem::take(&mut pending_blocks) },
                 });
                 completed_uid = Some(uid);
                 completed_uid_last_seen = embassy_time::Instant::now();

@@ -7,12 +7,14 @@ on:
     paths:
       - core/**
       - shared/**
+      - formats/**
       - .github/workflows/firmware.yml
   pull_request:
     branches: [main]
     paths:
       - core/**
       - shared/**
+      - formats/**
       - .github/workflows/firmware.yml
   workflow_dispatch:
 
@@ -67,12 +69,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: filascan-${{ runner.os }}-cargo-${{ hashFiles('core/Cargo.lock', 'shared/Cargo.lock') }}
+          key: filascan-${{ runner.os }}-cargo-${{ hashFiles('core/Cargo.lock', 'shared/Cargo.lock', 'formats/Cargo.lock') }}
           restore-keys: |
             filascan-${{ runner.os }}-cargo-
 
       - name: Add Cargo tools to PATH
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Test tag format decoders
+        run: cargo test --manifest-path formats/Cargo.toml --locked
 
       - name: Install ESP tools
         shell: bash

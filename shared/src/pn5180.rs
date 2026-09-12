@@ -26,6 +26,7 @@ pub enum Error {
     InvalidResponse,
     ReceiveStatus(u32),
     Authentication(u8),
+    TagStatus(u8),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +41,18 @@ pub struct TypeATarget {
     pub uid: [u8; 4],
     pub atqa: [u8; 2],
     pub sak: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeVTarget {
+    /// Canonical NFC-V UID order, with 0xE0 as the first byte.
+    pub uid: [u8; 8],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TypeVSystemInfo {
+    pub block_size: usize,
+    pub block_count: usize,
 }
 
 pub struct Pn5180<SPI, BUSY, RESET> {
@@ -85,10 +98,95 @@ where
     }
 
     pub async fn initialize_iso_a(&mut self) -> Result<(), Error> {
+        let _ = self.rf_off().await;
+        Timer::after_millis(5).await;
         self.write_register(IRQ_CLEAR, u32::MAX).await?;
         self.load_rf_config(0x00, 0x80).await?;
         self.rf_on().await?;
         Timer::after_millis(20).await;
+        Ok(())
+    }
+
+    pub async fn initialize_iso_v(&mut self) -> Result<(), Error> {
+        let _ = self.rf_off().await;
+        Timer::after_millis(5).await;
+        self.write_register(IRQ_CLEAR, u32::MAX).await?;
+        self.load_rf_config(0x0d, 0x8d).await?;
+        self.rf_on().await?;
+        Timer::after_millis(20).await;
+        Ok(())
+    }
+
+    pub async fn inventory_type_v(&mut self) -> Result<Option<TypeVTarget>, Error> {
+        let mut response = [0_u8; 10];
+        match self.transceive_iso_v(&[0x26, 0x01, 0x00], &mut response, Duration::from_millis(35)).await {
+            Ok(10) => {
+                let mut uid = [0_u8; 8];
+                for (destination, source) in uid.iter_mut().zip(response[2..10].iter().rev()) {
+                    *destination = *source;
+                }
+                if uid[0] != 0xe0 {
+                    return Err(Error::InvalidResponse);
+                }
+                Ok(Some(TypeVTarget { uid }))
+            }
+            Ok(_) => Err(Error::InvalidResponse),
+            Err(Error::ResponseTimeout) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub async fn type_v_system_info(&mut self, uid: &[u8; 8]) -> Result<TypeVSystemInfo, Error> {
+        let mut command = [0_u8; 10];
+        command[0] = 0x22;
+        command[1] = 0x2b;
+        for (destination, source) in command[2..10].iter_mut().zip(uid.iter().rev()) {
+            *destination = *source;
+        }
+        let mut response = [0_u8; 32];
+        let length = self.transceive_iso_v(&command, &mut response, Duration::from_millis(50)).await?;
+        if length < 10 {
+            return Err(Error::InvalidResponse);
+        }
+        let info_flags = response[1];
+        let mut cursor = 10;
+        if info_flags & 0x01 != 0 {
+            cursor += 1;
+        }
+        if info_flags & 0x02 != 0 {
+            cursor += 1;
+        }
+        if info_flags & 0x04 == 0 || cursor + 2 > length {
+            return Err(Error::InvalidResponse);
+        }
+        let block_count = response[cursor] as usize + 1;
+        let block_size = (response[cursor + 1] & 0x1f) as usize + 1;
+        Ok(TypeVSystemInfo { block_size, block_count })
+    }
+
+    pub async fn read_type_v_block(
+        &mut self,
+        uid: &[u8; 8],
+        block: u8,
+        data: &mut [u8],
+    ) -> Result<(), Error> {
+        if data.is_empty() || data.len() > 32 {
+            return Err(Error::InvalidResponse);
+        }
+        let mut command = [0_u8; 11];
+        command[0] = 0x22;
+        command[1] = 0x20;
+        for (destination, source) in command[2..10].iter_mut().zip(uid.iter().rev()) {
+            *destination = *source;
+        }
+        command[10] = block;
+        let mut response = [0_u8; 33];
+        let expected = data.len() + 1;
+        let length = self.transceive_iso_v(&command, &mut response[..expected], Duration::from_millis(50)).await?;
+        if length != expected {
+            return Err(Error::InvalidResponse);
+        }
+        data.copy_from_slice(&response[1..expected]);
         Ok(())
     }
 
@@ -259,6 +357,24 @@ where
     async fn read_data(&mut self, data: &mut [u8]) -> Result<(), Error> {
         self.command(&[0x0a, 0x00], Duration::from_millis(100)).await?;
         self.read_response(data).await
+    }
+
+    async fn transceive_iso_v(
+        &mut self,
+        command: &[u8],
+        response: &mut [u8],
+        timeout: Duration,
+    ) -> Result<usize, Error> {
+        self.write_register(IRQ_CLEAR, u32::MAX).await?;
+        self.send_data(command, 0).await?;
+        let Some(length) = self.wait_for_rx(1, response.len(), timeout).await? else {
+            return Err(Error::ResponseTimeout);
+        };
+        self.read_data(&mut response[..length]).await?;
+        if response[0] & 0x01 != 0 {
+            return Err(Error::TagStatus(response.get(1).copied().unwrap_or(0xff)));
+        }
+        Ok(length)
     }
 
     async fn wait_for_rx(

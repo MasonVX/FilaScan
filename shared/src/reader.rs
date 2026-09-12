@@ -30,25 +30,46 @@ pub enum ReaderMode {
     Pn5180,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagFormat {
+    BambuLab,
+    OpenPrintTag,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagProtocol {
+    Iso14443A { atqa: [u8; 2], sak: u8 },
+    Iso15693 { block_size: usize, block_count: usize },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagIdentity {
+    pub uid: Vec<u8>,
+    pub protocol: TagProtocol,
+}
+
+pub enum TagPayload {
+    BambuClassic { blocks: HashMap<i32, Vec<u8>> },
+    OpenPrintTag { memory: Vec<u8> },
+}
+
 pub enum ReaderEvent {
     Reading {
-        tag_uid: Vec<u8>,
-        atqa: [u8; 2],
-        sak: u8,
+        tag: TagIdentity,
+        format: TagFormat,
     },
     Retrying {
         tag_uid: Vec<u8>,
         next_attempt: u8,
         detail: String,
     },
-    Spool {
-        tag_uid: Vec<u8>,
-        blocks: HashMap<i32, Vec<u8>>,
+    TagRead {
+        tag: TagIdentity,
+        payload: TagPayload,
     },
     UnsupportedTag {
-        tag_uid: Vec<u8>,
-        atqa: [u8; 2],
-        sak: u8,
+        tag: TagIdentity,
+        detail: &'static str,
     },
     ReadFailed {
         tag_uid: Option<Vec<u8>>,

@@ -13,6 +13,7 @@ mod filaman;
 mod image_loader;
 mod localization;
 mod settings;
+mod spool;
 mod web_app;
 mod wifi;
 

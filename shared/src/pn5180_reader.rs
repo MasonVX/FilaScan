@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 use log::{error, info, warn};
 
 use crate::{
-    reader::{ReaderEvent, ReaderKind, RfidReader},
+    reader::{ReaderEvent, ReaderKind, RfidReader, TagFormat, TagIdentity, TagPayload, TagProtocol},
     nfc,
     pn5180::{Error as Pn5180Error, Pn5180},
 };
@@ -27,6 +27,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(150);
 const TRANSIENT_ERROR_RECOVERY_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_PAYLOAD_ATTEMPTS: u8 = 5;
 const MAX_STALLED_ATTEMPTS: u8 = 2;
+const MAX_OPENPRINTTAG_MEMORY: usize = 2 * 1024;
+const OPENPRINTTAG_BLOCK_ATTEMPTS: u8 = 3;
 
 #[derive(Debug)]
 struct PayloadError {
@@ -53,8 +55,40 @@ pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
     let mut missing_since: Option<Instant> = None;
     let mut transient_error_since: Option<Instant> = None;
     let mut transient_error_count = 0_u32;
+    let mut completed_type_v_uid: Option<[u8; 8]> = None;
+    let mut empty_iso_a_polls = 0_u8;
 
     loop {
+        if let Some(uid) = completed_type_v_uid {
+            match pn5180.inventory_type_v().await {
+                Ok(Some(target)) if target.uid == uid => {
+                    missing_since = None;
+                    Timer::after(POLL_INTERVAL).await;
+                    continue;
+                }
+                Ok(Some(_)) => {
+                    missing_since = None;
+                    Timer::after(POLL_INTERVAL).await;
+                    continue;
+                }
+                Ok(None) | Err(_) => {
+                    let first_missing = *missing_since.get_or_insert_with(Instant::now);
+                    if first_missing.elapsed() < TAG_REMOVAL_GRACE {
+                        Timer::after(POLL_INTERVAL).await;
+                        continue;
+                    }
+                    reader.borrow().notify_event(ReaderEvent::TagRemoved);
+                    completed_type_v_uid = None;
+                    missing_since = None;
+                    if let Err(error) = pn5180.initialize_iso_a().await {
+                        error!("PN5180 could not return to ISO-A after NFC-V tag removal: {error:?}");
+                    }
+                    Timer::after(POLL_INTERVAL).await;
+                    continue;
+                }
+            }
+        }
+
         let target = match prefetched_target.take() {
             Some(target) => {
                 transient_error_since = None;
@@ -121,6 +155,27 @@ pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
         };
 
         let Some(target) = target else {
+            if completed_uid.is_none() && pending_uid.is_none() {
+                empty_iso_a_polls = empty_iso_a_polls.saturating_add(1);
+                if empty_iso_a_polls >= 2 {
+                    empty_iso_a_polls = 0;
+                    match try_read_openprinttag(&reader, &mut pn5180).await {
+                        Ok(Some(uid)) => {
+                            completed_type_v_uid = Some(uid);
+                            missing_since = None;
+                            Timer::after(POLL_INTERVAL).await;
+                            continue;
+                        }
+                        Ok(None) => {}
+                        Err(detail) => {
+                            error!("OpenPrintTag scan failed: {detail}");
+                        }
+                    }
+                    if let Err(error) = pn5180.initialize_iso_a().await {
+                        error!("PN5180 could not return to ISO-A after NFC-V scan: {error:?}");
+                    }
+                }
+            }
             let first_missing = *missing_since.get_or_insert_with(Instant::now);
             if first_missing.elapsed() >= TAG_REMOVAL_GRACE {
                 if completed_uid.take().is_some() || pending_uid.take().is_some() {
@@ -135,6 +190,7 @@ pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
             continue;
         };
         missing_since = None;
+        empty_iso_a_polls = 0;
 
         // A completed placement stays latched while any tag remains in the RF
         // field. Bambu spools carry two tags, and a PN5180 may alternate between
@@ -153,11 +209,14 @@ pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
         }
 
         let uid = target.uid.to_vec();
+        let tag = TagIdentity {
+            uid: uid.clone(),
+            protocol: TagProtocol::Iso14443A { atqa: target.atqa, sak: target.sak },
+        };
         if !is_mifare_classic_1k(target.atqa, target.sak) {
             reader.borrow().notify_event(ReaderEvent::UnsupportedTag {
-                tag_uid: uid,
-                atqa: target.atqa,
-                sak: target.sak,
+                tag,
+                detail: "expected MIFARE Classic 1K",
             });
             completed_uid = Some(target.uid);
             continue;
@@ -169,9 +228,8 @@ pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
             pending_attempt = 0;
             stalled_attempts = 0;
             reader.borrow().notify_event(ReaderEvent::Reading {
-                tag_uid: uid.clone(),
-                atqa: target.atqa,
-                sak: target.sak,
+                tag: tag.clone(),
+                format: TagFormat::BambuLab,
             });
         }
 
@@ -179,9 +237,9 @@ pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
         let blocks_before_attempt = pending_blocks.len();
         match read_payload(&mut pn5180, &target.uid, &mut pending_blocks).await {
             Ok(()) => {
-                reader.borrow().notify_event(ReaderEvent::Spool {
-                    tag_uid: uid,
-                    blocks: core::mem::take(&mut pending_blocks),
+                reader.borrow().notify_event(ReaderEvent::TagRead {
+                    tag,
+                    payload: TagPayload::BambuClassic { blocks: core::mem::take(&mut pending_blocks) },
                 });
                 completed_uid = Some(target.uid);
                 pending_uid = None;
@@ -232,6 +290,85 @@ pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
 
         Timer::after_millis(80).await;
     }
+}
+
+async fn try_read_openprinttag(
+    reader: &Rc<RefCell<RfidReader>>,
+    pn5180: &mut Device,
+) -> Result<Option<[u8; 8]>, alloc::string::String> {
+    pn5180
+        .initialize_iso_v()
+        .await
+        .map_err(|error| format!("could not initialize NFC-V: {error:?}"))?;
+    let Some(target) = pn5180
+        .inventory_type_v()
+        .await
+        .map_err(|error| format!("NFC-V inventory failed: {error:?}"))?
+    else {
+        return Ok(None);
+    };
+    let info = match pn5180.type_v_system_info(&target.uid).await {
+        Ok(info) => info,
+        Err(error) => {
+            let detail = format!("NFC-V system information failed: {error:?}");
+            reader.borrow().notify_event(ReaderEvent::ReadFailed {
+                tag_uid: Some(target.uid.to_vec()),
+                detail,
+            });
+            return Ok(Some(target.uid));
+        }
+    };
+    let Some(memory_size) = info.block_size.checked_mul(info.block_count).filter(|size| *size <= MAX_OPENPRINTTAG_MEMORY)
+    else {
+        let detail = format!("NFC-V memory size is unsupported: {} x {} bytes", info.block_count, info.block_size);
+        reader.borrow().notify_event(ReaderEvent::ReadFailed {
+            tag_uid: Some(target.uid.to_vec()),
+            detail,
+        });
+        return Ok(Some(target.uid));
+    };
+    let tag = TagIdentity {
+        uid: target.uid.to_vec(),
+        protocol: TagProtocol::Iso15693 { block_size: info.block_size, block_count: info.block_count },
+    };
+    reader.borrow().notify_event(ReaderEvent::Reading { tag: tag.clone(), format: TagFormat::OpenPrintTag });
+
+    let mut memory = Vec::with_capacity(memory_size);
+    for block in 0..info.block_count {
+        let mut data = [0_u8; 32];
+        let mut last_error = None;
+        for attempt in 1..=OPENPRINTTAG_BLOCK_ATTEMPTS {
+            match pn5180.read_type_v_block(&target.uid, block as u8, &mut data[..info.block_size]).await {
+                Ok(()) => {
+                    last_error = None;
+                    break;
+                }
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt < OPENPRINTTAG_BLOCK_ATTEMPTS {
+                        Timer::after_millis(15).await;
+                    }
+                }
+            }
+        }
+        if let Some(error) = last_error {
+            let detail = format!(
+                "NFC-V block {block} failed after {OPENPRINTTAG_BLOCK_ATTEMPTS} attempts: {error:?}"
+            );
+            reader.borrow().notify_event(ReaderEvent::ReadFailed {
+                tag_uid: Some(target.uid.to_vec()),
+                detail,
+            });
+            return Ok(Some(target.uid));
+        }
+        memory.extend_from_slice(&data[..info.block_size]);
+    }
+
+    reader.borrow().notify_event(ReaderEvent::TagRead {
+        tag,
+        payload: TagPayload::OpenPrintTag { memory },
+    });
+    Ok(Some(target.uid))
 }
 
 async fn reacquire_with_recovery(pn5180: &mut Device) -> Option<crate::pn5180::TypeATarget> {

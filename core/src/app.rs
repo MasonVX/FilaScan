@@ -11,7 +11,9 @@ use framework::framework::{Framework, FrameworkObserver, WebConfigMode};
 use framework::utils::SpawnerHeapExt;
 use hashbrown::HashMap;
 use log::{error, info, warn};
-use shared::reader::{ReaderEvent, ReaderKind, RfidReader, RfidReaderObserver};
+use shared::reader::{
+    ReaderEvent, ReaderKind, RfidReader, RfidReaderObserver, TagFormat, TagPayload, TagProtocol,
+};
 use slint::{Color, ComponentHandle, Image, ModelRc, SharedString, VecModel};
 
 use crate::{
@@ -21,6 +23,7 @@ use crate::{
     filaman::{ArchiveOutcome, FilaManLocation, FilaManService, ImportOutcome, MoveOutcome, SpoolRegistration},
     image_loader,
     localization::{self, Language, LocalizationService},
+    spool::{FilamentSpool, ProductReference},
 };
 
 slint::include_modules!();
@@ -578,78 +581,107 @@ impl ReaderController {
         }
     }
 
-    fn show_spool(&mut self, spool: &BambuSpool) {
-        self.active_tray_uid = spool.tray_uid.clone();
+    fn show_spool(&mut self, spool: &FilamentSpool) {
+        self.active_tray_uid = spool.external_id.clone();
         let ui = self.ui.unwrap();
         let state = ui.global::<ReaderState>();
         state.set_reading(false);
         state.set_has_spool(true);
         state.set_status_text(self.t("Spool read successfully", "Spule erfolgreich gelesen").into());
 
-        state.set_material_name(spool.official_material_name.clone().into());
-        state.set_material_detail(format!("{} · {} · {}", spool.filament_type, spool.material_id, spool.variant_id).into());
-        state.set_color_name(spool.display_color_name.clone().into());
-        state.set_color_code(format!("#{}", spool.color_hex).into());
-        state.set_bambu_color_code(spool.bambu_color_code.clone().into());
-        state.set_primary_color(to_slint_color(spool.primary_rgba));
-        state.set_has_secondary_color(spool.secondary_rgba.is_some());
-        if let Some(color) = spool.secondary_rgba {
-            state.set_secondary_color(to_slint_color(color));
+        state.set_material_name(spool.display_name().into());
+        state.set_material_detail(format!("{} · {}", spool.material_type, spool.source_detail).into());
+        state.set_color_name(spool.color_name.clone().into());
+        state.set_color_code(format!("#{}", hex::encode_upper(spool.primary_color())).into());
+        let bambu_color_code = match &spool.product_reference {
+            ProductReference::Bambu { color_code } => color_code.as_str(),
+            ProductReference::OpenPrintTag { .. } => "",
+        };
+        state.set_bambu_color_code(bambu_color_code.into());
+        state.set_primary_color(to_slint_color(spool.primary_color()));
+        state.set_has_secondary_color(spool.colors.len() > 1);
+        if let Some(color) = spool.colors.get(1) {
+            state.set_secondary_color(to_slint_color(*color));
         }
         state.set_spool_image(Image::default());
         state.set_has_spool_image(false);
         state.set_spool_image_loading(false);
 
-        state.set_physical_parameters(format!("{} g · Ø {:.2} mm · {} m", spool.weight_g, spool.diameter_mm, spool.filament_length_m).into());
-        state.set_temperature_parameters(
-            if self.language() == Language::German {
-                format!(
-                    "Düse {}–{} °C · Bett {} °C",
-                    spool.nozzle_temperature_min_c, spool.nozzle_temperature_max_c, spool.bed_temperature_c
-                )
-            } else {
-                format!(
-                    "Nozzle {}–{} °C · Bed {} °C",
-                    spool.nozzle_temperature_min_c, spool.nozzle_temperature_max_c, spool.bed_temperature_c
-                )
-            }
-            .into(),
+        state.set_physical_parameters(self.physical_parameters(spool).into());
+        state.set_temperature_parameters(self.temperature_parameters(spool).into());
+        state.set_drying_parameters(self.drying_parameters(spool).into());
+        state.set_production_parameters(spool.additional_details.join(" · ").into());
+        state.set_identifier_parameters(
+            format!("{} {} · Tag UID {}", self.t("External ID", "Externe ID"), spool.external_id, spool.tag_uid).into(),
         );
-        state.set_drying_parameters(
-            if self.language() == Language::German {
-                format!(
-                    "Trocknen {} °C / {} h · Breite {:.2} mm",
-                    spool.drying_temperature_c, spool.drying_time_h, spool.spool_width_mm
-                )
-            } else {
-                format!(
-                    "Dry {} °C / {} h · Width {:.2} mm",
-                    spool.drying_temperature_c, spool.drying_time_h, spool.spool_width_mm
-                )
-            }
-            .into(),
-        );
-        state.set_production_parameters(
-            if self.language() == Language::German {
-                format!("Produziert {} · Tag-Typ {}", spool.production_date, spool.detailed_filament_type)
-            } else {
-                format!("Produced {} · Tag type {}", spool.production_date, spool.detailed_filament_type)
-            }
-            .into(),
-        );
-        state.set_identifier_parameters(format!("Tray UID {} · Tag UID {}", spool.tray_uid, spool.tag_uid).into());
 
         self.framework.borrow().undim_display();
         self.start_product_image_load(spool);
     }
 
-    fn start_product_image_load(&self, spool: &BambuSpool) {
-        if spool.bambu_color_code.is_empty() {
-            self.log_info(&format!("No Bambu product image mapping for color code {}", spool.bambu_color_code));
-            return;
+    fn physical_parameters(&self, spool: &FilamentSpool) -> String {
+        let mut values = Vec::new();
+        if let Some(weight) = spool.remaining_weight_g.or(spool.nominal_weight_g) {
+            values.push(format!("{weight:.0} g"));
         }
+        if let Some(diameter) = spool.diameter_mm {
+            values.push(format!("Ø {diameter:.2} mm"));
+        }
+        if let Some(length) = spool.length_m {
+            values.push(format!("{length:.0} m"));
+        }
+        if let Some(empty_weight) = spool.empty_container_weight_g {
+            values.push(format!("{} {empty_weight:.0} g", self.t("empty", "leer")));
+        }
+        values.join(" · ")
+    }
 
-        let product_code = spool.bambu_color_code.clone();
+    fn temperature_parameters(&self, spool: &FilamentSpool) -> String {
+        let mut values = Vec::new();
+        match (spool.nozzle_min_c, spool.nozzle_max_c) {
+            (Some(minimum), Some(maximum)) => values.push(format!("{} {minimum:.0}–{maximum:.0} °C", self.t("Nozzle", "Düse"))),
+            (Some(value), None) | (None, Some(value)) => values.push(format!("{} {value:.0} °C", self.t("Nozzle", "Düse"))),
+            (None, None) => {}
+        }
+        match (spool.bed_min_c, spool.bed_max_c) {
+            (Some(minimum), Some(maximum)) if minimum != maximum => {
+                values.push(format!("{} {minimum:.0}–{maximum:.0} °C", self.t("Bed", "Bett")))
+            }
+            (Some(value), _) | (_, Some(value)) => values.push(format!("{} {value:.0} °C", self.t("Bed", "Bett"))),
+            (None, None) => {}
+        }
+        values.join(" · ")
+    }
+
+    fn drying_parameters(&self, spool: &FilamentSpool) -> String {
+        match (spool.drying_temperature_c, spool.drying_time_h) {
+            (Some(temperature), Some(hours)) => {
+                format!("{} {temperature:.0} °C / {hours:.1} h", self.t("Dry", "Trocknen"))
+            }
+            (Some(temperature), None) => format!("{} {temperature:.0} °C", self.t("Dry", "Trocknen")),
+            (None, Some(hours)) => format!("{} {hours:.1} h", self.t("Dry", "Trocknen")),
+            (None, None) => String::new(),
+        }
+    }
+
+    fn start_product_image_load(&self, spool: &FilamentSpool) {
+        let product_code = match &spool.product_reference {
+            ProductReference::Bambu { color_code } if !color_code.is_empty() => color_code.clone(),
+            ProductReference::Bambu { .. } => {
+                self.log_info("No Bambu product image mapping for this spool");
+                return;
+            }
+            ProductReference::OpenPrintTag { brand_uuid, material_uuid, gtin, brand_name } => {
+                self.log_info(&format!(
+                    "No product image provider configured for OpenPrintTag brand {} (brand UUID {}, material UUID {}, GTIN {})",
+                    brand_name.as_deref().unwrap_or("unknown"),
+                    if brand_uuid.is_some() { "present" } else { "missing" },
+                    if material_uuid.is_some() { "present" } else { "missing" },
+                    gtin.map(|value| format!("{value}")).as_deref().unwrap_or("missing")
+                ));
+                return;
+            }
+        };
         let ui = self.ui.clone();
         let diagnostics = self.diagnostics.clone();
         let (framework, spawner) = {
@@ -735,6 +767,26 @@ impl ReaderController {
             }
         }
     }
+
+    fn log_openprinttag_dump(&self, spool: &FilamentSpool, tag: &formats::openprinttag::OpenPrintTag) {
+        self.log_info("OpenPrintTag decoded data:");
+        self.log_info(&format!("  Tag UID: {}", spool.tag_uid));
+        self.log_info(&format!("  Instance ID: {}", spool.external_id));
+        self.log_info(&format!("  Brand: {}", spool.brand.as_deref().unwrap_or("not provided")));
+        self.log_info(&format!("  Material: {} / {}", spool.material_name, spool.material_type));
+        self.log_info(&format!("  Colors: {}", spool.colors.len()));
+        self.log_info(&format!(
+            "  Weight: nominal {:?} g / remaining {:?} g / empty container {:?} g",
+            spool.nominal_weight_g, spool.remaining_weight_g, spool.empty_container_weight_g
+        ));
+        self.log_info(&format!("  Diameter: {:?} mm / length: {:?} m", spool.diameter_mm, spool.length_m));
+        self.log_info(&format!(
+            "  Material UUID present: {} / Brand UUID present: {} / GTIN: {:?}",
+            tag.material_uuid.is_some(),
+            tag.brand_uuid.is_some(),
+            tag.gtin
+        ));
+    }
 }
 
 impl RfidReaderObserver for ReaderController {
@@ -746,8 +798,8 @@ impl RfidReaderObserver for ReaderController {
             self.log_info(&format!("{} reader initialized and ready", reader.name()));
             state.set_status_text(
                 self.t(
-                    "Hold a Bambu filament spool near the reader",
-                    "Halte eine Bambu-Filamentspule an den Leser",
+                    "Hold a filament spool near the reader",
+                    "Halte eine Filamentspule an den Leser",
                 )
                 .into(),
             );
@@ -759,18 +811,33 @@ impl RfidReaderObserver for ReaderController {
 
     fn on_reader_event(&mut self, event: &ReaderEvent) {
         match event {
-            ReaderEvent::Reading { tag_uid, atqa, sak } => {
+            ReaderEvent::Reading { tag, format } => {
+                let protocol = match tag.protocol {
+                    TagProtocol::Iso14443A { atqa, sak } => {
+                        format!("ISO-A, ATQA {:02X}{:02X}, SAK {:02X}", atqa[0], atqa[1], sak)
+                    }
+                    TagProtocol::Iso15693 { block_size, block_count } => {
+                        format!("NFC-V, {block_count} blocks x {block_size} bytes")
+                    }
+                };
+                let format_name = match format {
+                    TagFormat::BambuLab => "Bambu",
+                    TagFormat::OpenPrintTag => "OpenPrintTag",
+                };
                 self.log_info(&format!(
-                    "Tag detected: UID {}, ATQA {:02X}{:02X}, SAK {:02X}; reading Bambu payload",
-                    hex::encode_upper(tag_uid),
-                    atqa[0],
-                    atqa[1],
-                    sak
+                    "Tag detected: UID {}, {protocol}; reading {format_name} payload",
+                    hex::encode_upper(&tag.uid)
                 ));
                 let ui = self.ui.unwrap();
                 let state = ui.global::<ReaderState>();
                 state.set_reading(true);
-                state.set_status_text(self.t("Reading Bambu RFID tag…", "Bambu-RFID-Tag wird gelesen…").into());
+                state.set_status_text(
+                    match format {
+                        TagFormat::BambuLab => self.t("Reading Bambu RFID tag…", "Bambu-RFID-Tag wird gelesen…"),
+                        TagFormat::OpenPrintTag => self.t("Reading OpenPrintTag…", "OpenPrintTag wird gelesen…"),
+                    }
+                    .into(),
+                );
                 self.framework.borrow().undim_display();
             }
             ReaderEvent::Retrying {
@@ -789,27 +856,53 @@ impl RfidReaderObserver for ReaderController {
                 state.set_reading(true);
                 state.set_status_text(self.t("Read unstable; retrying…", "Lesen instabil; neuer Versuch…").into());
             }
-            ReaderEvent::Spool { tag_uid, blocks } => {
-                let spool = BambuSpool::from_tag(tag_uid, blocks, &self.catalog.borrow(), self.language());
-                self.log_info(&format!(
-                    "Spool read: {} / {} / #{} (material {}, variant {})",
-                    spool.official_material_name, spool.color_name, spool.color_hex, spool.material_id, spool.variant_id
-                ));
-                self.log_spool_dump(&spool, blocks);
-                self.show_spool(&spool);
-                self.start_filaman_preparation(spool);
-            }
-            ReaderEvent::UnsupportedTag { tag_uid, atqa, sak } => {
-                self.log_warn(&format!(
-                    "Unsupported ISO-A tag: UID {}, ATQA {:02X}{:02X}, SAK {:02X}; expected MIFARE Classic 1K",
-                    hex::encode_upper(tag_uid),
-                    atqa[0],
-                    atqa[1],
-                    sak
-                ));
+            ReaderEvent::TagRead { tag, payload } => match payload {
+                TagPayload::BambuClassic { blocks } => {
+                    let spool = BambuSpool::from_tag(&tag.uid, blocks, &self.catalog.borrow(), self.language());
+                    self.log_info(&format!(
+                        "Spool read: {} / {} / #{} (material {}, variant {})",
+                        spool.official_material_name,
+                        spool.color_name,
+                        spool.color_hex,
+                        spool.material_id,
+                        spool.variant_id
+                    ));
+                    self.log_spool_dump(&spool, blocks);
+                    self.show_spool(&FilamentSpool::from_bambu(&spool));
+                    self.start_filaman_preparation(spool);
+                }
+                TagPayload::OpenPrintTag { memory } => {
+                    match formats::openprinttag::decode_tag_memory(memory) {
+                        Ok(open_tag) => {
+                            let spool = FilamentSpool::from_openprinttag(&tag.uid, &open_tag);
+                            self.log_info(&format!(
+                                "OpenPrintTag spool read: {} / {} / {} bytes",
+                                spool.display_name(),
+                                spool.material_type,
+                                memory.len()
+                            ));
+                            self.log_openprinttag_dump(&spool, &open_tag);
+                            self.reset_filaman_context();
+                            self.show_spool(&spool);
+                        }
+                        Err(error) => {
+                            self.log_warn(&format!(
+                                "NFC-V tag {} is not a supported OpenPrintTag: {error:?}",
+                                hex::encode_upper(&tag.uid)
+                            ));
+                            self.show_status(self.t(
+                                "NFC-V tag does not contain valid OpenPrintTag data",
+                                "NFC-V-Tag enthält keine gültigen OpenPrintTag-Daten",
+                            ));
+                        }
+                    }
+                }
+            },
+            ReaderEvent::UnsupportedTag { tag, detail } => {
+                self.log_warn(&format!("Unsupported tag: UID {}; {detail}", hex::encode_upper(&tag.uid)));
                 self.show_status(self.t(
-                    "Tag is not a supported Bambu Lab spool",
-                    "Tag gehört nicht zu einer unterstützten Bambu-Lab-Spule",
+                    "Tag is not a supported filament spool",
+                    "Tag gehört nicht zu einer unterstützten Filamentspule",
                 ));
             }
             ReaderEvent::ReadFailed { tag_uid, detail } => {
