@@ -18,6 +18,7 @@ pub enum ProductReference {
         material_uuid: Option<[u8; 16]>,
         gtin: Option<u64>,
         brand_name: Option<String>,
+        ndef_uri: Option<String>,
     },
 }
 
@@ -135,6 +136,7 @@ impl FilamentSpool {
                 material_uuid: tag.material_uuid,
                 gtin: tag.gtin,
                 brand_name: tag.brand_name.clone(),
+                ndef_uri: tag.ndef_uri.clone(),
             },
         }
     }

@@ -23,6 +23,7 @@ use crate::{
     filaman::{ArchiveOutcome, FilaManLocation, FilaManService, ImportOutcome, MoveOutcome, SpoolRegistration},
     image_loader,
     localization::{self, Language, LocalizationService},
+    openprinttag_catalog,
     spool::{FilamentSpool, ProductReference, SpoolSource},
 };
 
@@ -589,6 +590,18 @@ impl ReaderController {
         state.set_has_spool(true);
         state.set_status_text(self.t("Spool read successfully", "Spule erfolgreich gelesen").into());
 
+        self.render_spool_details(spool);
+        state.set_spool_image(Image::default());
+        state.set_has_spool_image(false);
+        state.set_spool_image_loading(false);
+
+        self.framework.borrow().undim_display();
+        self.start_product_image_load(spool);
+    }
+
+    fn render_spool_details(&self, spool: &FilamentSpool) {
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
         state.set_material_name(spool.display_name().into());
         state.set_material_detail(format!("{} · {}", spool.material_type, spool.source_detail).into());
         state.set_color_code(format!("#{}", hex::encode_upper(spool.primary_color())).into());
@@ -609,10 +622,6 @@ impl ReaderController {
         if let Some(color) = spool.colors.get(1) {
             state.set_secondary_color(to_slint_color(*color));
         }
-        state.set_spool_image(Image::default());
-        state.set_has_spool_image(false);
-        state.set_spool_image_loading(false);
-
         state.set_physical_parameters(self.physical_parameters(spool).into());
         state.set_temperature_parameters(self.temperature_parameters(spool).into());
         state.set_drying_parameters(self.drying_parameters(spool).into());
@@ -621,8 +630,6 @@ impl ReaderController {
             format!("{} {} · Tag UID {}", self.t("External ID", "Externe ID"), spool.external_id, spool.tag_uid).into(),
         );
 
-        self.framework.borrow().undim_display();
-        self.start_product_image_load(spool);
     }
 
     fn physical_parameters(&self, spool: &FilamentSpool) -> String {
@@ -671,23 +678,32 @@ impl ReaderController {
     }
 
     fn start_product_image_load(&self, spool: &FilamentSpool) {
-        let product_code = match &spool.product_reference {
-            ProductReference::Bambu { color_code } if !color_code.is_empty() => color_code.clone(),
+        match &spool.product_reference {
+            ProductReference::Bambu { color_code } if !color_code.is_empty() => self.start_bambu_product_image_load(color_code.clone()),
             ProductReference::Bambu { .. } => {
                 self.log_info("No Bambu product image mapping for this spool");
-                return;
             }
-            ProductReference::OpenPrintTag { brand_uuid, material_uuid, gtin, brand_name } => {
+            ProductReference::OpenPrintTag {
+                brand_uuid,
+                material_uuid,
+                gtin,
+                brand_name,
+                ndef_uri,
+            } => {
                 self.log_info(&format!(
-                    "No product image provider configured for OpenPrintTag brand {} (brand UUID {}, material UUID {}, GTIN {})",
+                    "OpenPrintTag catalog lookup: brand {}, brand UUID {}, material UUID {}, GTIN {}, NDEF URI {}",
                     brand_name.as_deref().unwrap_or("unknown"),
                     if brand_uuid.is_some() { "present" } else { "missing" },
                     if material_uuid.is_some() { "present" } else { "missing" },
-                    gtin.map(|value| format!("{value}")).as_deref().unwrap_or("missing")
+                    gtin.map(|value| format!("{value}")).as_deref().unwrap_or("missing"),
+                    ndef_uri.as_deref().unwrap_or("missing")
                 ));
-                return;
+                self.start_openprinttag_catalog_load(spool.clone());
             }
-        };
+        }
+    }
+
+    fn start_bambu_product_image_load(&self, product_code: String) {
         let ui = self.ui.clone();
         let diagnostics = self.diagnostics.clone();
         let (framework, spawner) = {
@@ -712,6 +728,7 @@ impl ReaderController {
                     let source = match loaded.source {
                         image_loader::ProductImageSource::SdCard => "SD cache",
                         image_loader::ProductImageSource::BambuCdn => "Bambu CDN",
+                        image_loader::ProductImageSource::OpenPrintTagCdn => "OpenPrintTag CDN",
                     };
                     let message = format!("Bambu product image loaded for color code {product_code} from {source}");
                     info!("{}", message);
@@ -728,6 +745,68 @@ impl ReaderController {
         if spawner.spawn_heap(future).is_err() {
             self.ui.unwrap().global::<ReaderState>().set_spool_image_loading(false);
             self.log_warn("Could not start Bambu product image download task");
+        }
+    }
+
+    fn start_openprinttag_catalog_load(&self, spool: FilamentSpool) {
+        let external_id = spool.external_id.clone();
+        let weak = self.self_ref.clone();
+        let (framework, spawner) = {
+            let framework = self.framework.borrow();
+            (self.framework.clone(), framework.spawner)
+        };
+        self.ui.unwrap().global::<ReaderState>().set_spool_image_loading(true);
+        if spawner
+            .spawn_heap(async move {
+                let result = openprinttag_catalog::load(framework, &spool).await;
+                if let Some(controller) = weak.upgrade() {
+                    controller.borrow_mut().finish_openprinttag_catalog_load(external_id, spool, result);
+                }
+            })
+            .is_err()
+        {
+            self.ui.unwrap().global::<ReaderState>().set_spool_image_loading(false);
+            self.log_warn("Could not start OpenPrintTag catalog lookup task");
+        }
+    }
+
+    fn finish_openprinttag_catalog_load(
+        &mut self,
+        external_id: String,
+        mut spool: FilamentSpool,
+        result: Result<openprinttag_catalog::CatalogEnrichment, String>,
+    ) {
+        if self.active_tray_uid != external_id {
+            self.log_info(&format!("Ignoring stale OpenPrintTag catalog result for {external_id}"));
+            return;
+        }
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
+        state.set_spool_image_loading(false);
+        match result {
+            Ok(enrichment) => {
+                self.log_info(&format!(
+                    "OpenPrintTag catalog entry loaded from {}: {}",
+                    enrichment.source.label(),
+                    enrichment.material.log_summary()
+                ));
+                enrichment.material.apply_to(&mut spool);
+                self.render_spool_details(&spool);
+                if let Some(loaded) = enrichment.image {
+                    let source = match loaded.source {
+                        image_loader::ProductImageSource::SdCard => "SD cache",
+                        image_loader::ProductImageSource::OpenPrintTagCdn => "OpenPrintTag CDN",
+                        image_loader::ProductImageSource::BambuCdn => "Bambu CDN",
+                    };
+                    state.set_spool_image(loaded.image);
+                    state.set_has_spool_image(true);
+                    self.log_info(&format!("OpenPrintTag product image loaded from {source}"));
+                }
+                if let Some(error) = enrichment.image_error {
+                    self.log_warn(&format!("OpenPrintTag product image unavailable: {error}"));
+                }
+            }
+            Err(error) => self.log_warn(&format!("OpenPrintTag catalog lookup unavailable; using tag data: {error}")),
         }
     }
 
@@ -778,6 +857,7 @@ impl ReaderController {
         self.log_info("OpenPrintTag decoded data:");
         self.log_info(&format!("  Tag UID: {}", spool.tag_uid));
         self.log_info(&format!("  Instance ID: {}", spool.external_id));
+        self.log_info(&format!("  NDEF URI: {}", tag.ndef_uri.as_deref().unwrap_or("not provided")));
         self.log_info(&format!("  Brand: {}", spool.brand.as_deref().unwrap_or("not provided")));
         self.log_info(&format!("  Material: {} / {}", spool.material_name, spool.material_type));
         self.log_info(&format!("  Colors: {}", spool.colors.len()));

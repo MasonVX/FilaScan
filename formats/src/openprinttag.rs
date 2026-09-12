@@ -25,6 +25,7 @@ pub struct TemperatureRange {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenPrintTag {
+    pub ndef_uri: Option<String>,
     pub instance_uuid: Option<[u8; 16]>,
     pub package_uuid: Option<[u8; 16]>,
     pub material_uuid: Option<[u8; 16]>,
@@ -79,7 +80,9 @@ struct Regions {
 pub fn decode_tag_memory(memory: &[u8]) -> Result<OpenPrintTag, Error> {
     let ndef = find_ndef_message(memory)?;
     let payload = find_openprinttag_payload(ndef)?;
-    decode_payload(payload)
+    let mut tag = decode_payload(payload)?;
+    tag.ndef_uri = find_ndef_uri(ndef);
+    Ok(tag)
 }
 
 pub fn decode_payload(payload: &[u8]) -> Result<OpenPrintTag, Error> {
@@ -329,6 +332,7 @@ fn decode_main(data: &[u8]) -> Result<OpenPrintTag, Error> {
     }
 
     Ok(OpenPrintTag {
+        ndef_uri: None,
         instance_uuid,
         package_uuid,
         material_uuid,
@@ -358,6 +362,110 @@ fn decode_main(data: &[u8]) -> Result<OpenPrintTag, Error> {
         consumed_weight_g: None,
         storage_location: None,
     })
+}
+
+fn find_ndef_uri(message: &[u8]) -> Option<String> {
+    find_ndef_uri_inner(message, true)
+}
+
+fn find_ndef_uri_inner(message: &[u8], allow_smart_poster: bool) -> Option<String> {
+    let mut cursor = 0;
+    while cursor < message.len() {
+        let header = *message.get(cursor)?;
+        cursor += 1;
+        if header & 0x20 != 0 {
+            return None;
+        }
+        let short = header & 0x10 != 0;
+        let has_id = header & 0x08 != 0;
+        let tnf = header & 0x07;
+        let type_length = *message.get(cursor)? as usize;
+        cursor += 1;
+        let payload_length = if short {
+            let length = *message.get(cursor)? as usize;
+            cursor += 1;
+            length
+        } else {
+            let bytes = message.get(cursor..cursor + 4)?;
+            cursor += 4;
+            u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
+        };
+        let id_length = if has_id {
+            let length = *message.get(cursor)? as usize;
+            cursor += 1;
+            length
+        } else {
+            0
+        };
+        let record_end = cursor.checked_add(type_length)?.checked_add(id_length)?.checked_add(payload_length)?;
+        if record_end > message.len() {
+            return None;
+        }
+        let record_type = &message[cursor..cursor + type_length];
+        cursor += type_length + id_length;
+        let record_payload = &message[cursor..cursor + payload_length];
+        if tnf == 0x01 && record_type == b"U" {
+            if let Some(uri) = decode_ndef_uri(record_payload) {
+                return Some(uri);
+            }
+        } else if allow_smart_poster && tnf == 0x01 && record_type == b"Sp" {
+            if let Some(uri) = find_ndef_uri_inner(record_payload, false) {
+                return Some(uri);
+            }
+        }
+        cursor = record_end;
+        if header & 0x40 != 0 {
+            break;
+        }
+    }
+    None
+}
+
+fn decode_ndef_uri(payload: &[u8]) -> Option<String> {
+    let (&prefix_code, suffix) = payload.split_first()?;
+    let prefix = match prefix_code {
+        0x00 => "",
+        0x01 => "http://www.",
+        0x02 => "https://www.",
+        0x03 => "http://",
+        0x04 => "https://",
+        0x05 => "tel:",
+        0x06 => "mailto:",
+        0x07 => "ftp://anonymous:anonymous@",
+        0x08 => "ftp://ftp.",
+        0x09 => "ftps://",
+        0x0a => "sftp://",
+        0x0b => "smb://",
+        0x0c => "nfs://",
+        0x0d => "ftp://",
+        0x0e => "dav://",
+        0x0f => "news:",
+        0x10 => "telnet://",
+        0x11 => "imap:",
+        0x12 => "rtsp://",
+        0x13 => "urn:",
+        0x14 => "pop:",
+        0x15 => "sip:",
+        0x16 => "sips:",
+        0x17 => "tftp:",
+        0x18 => "btspp://",
+        0x19 => "btl2cap://",
+        0x1a => "btgoep://",
+        0x1b => "tcpobex://",
+        0x1c => "irdaobex://",
+        0x1d => "file://",
+        0x1e => "urn:epc:id:",
+        0x1f => "urn:epc:tag:",
+        0x20 => "urn:epc:pat:",
+        0x21 => "urn:epc:raw:",
+        0x22 => "urn:epc:",
+        0x23 => "urn:nfc:",
+        _ => return None,
+    };
+    let suffix = core::str::from_utf8(suffix).ok()?;
+    let mut uri = String::from(prefix);
+    uri.push_str(suffix);
+    Some(uri)
 }
 
 fn decode_aux(data: &[u8], tag: &mut OpenPrintTag) -> Result<(), Error> {
@@ -478,7 +586,9 @@ mod tests {
     #[test]
     fn finds_openprinttag_after_another_ndef_record() {
         let payload = [0xa0, 0xa1, 0x08, 0x00];
-        let mut ndef = vec![0x91, 0x01, 0x01, b'T', b'x'];
+        let uri_suffix = b"www.prusa3d.com/product/test/";
+        let mut ndef = vec![0x91, 0x01, (uri_suffix.len() + 1) as u8, b'U', 0x04];
+        ndef.extend_from_slice(uri_suffix);
         ndef.extend_from_slice(&[0x52, MIME_TYPE.len() as u8, payload.len() as u8]);
         ndef.extend_from_slice(MIME_TYPE);
         ndef.extend_from_slice(&payload);
@@ -488,6 +598,7 @@ mod tests {
 
         let tag = decode_tag_memory(&memory).unwrap();
         assert_eq!(tag.material_class, 0);
+        assert_eq!(tag.ndef_uri.as_deref(), Some("https://www.prusa3d.com/product/test/"));
     }
 
     #[test]

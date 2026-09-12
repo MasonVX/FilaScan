@@ -24,6 +24,7 @@ use zune_jpeg::JpegDecoder;
 
 const AMAZON_ROOT_CA_1: &str = include_str!("certs/amazon-root-ca-1.pem");
 const DIGICERT_GLOBAL_ROOT_G2: &str = include_str!("certs/digicert-global-root-g2.pem");
+pub(crate) const GTS_ROOT_R4: &str = include_str!("certs/gts-root-r4.pem");
 const STORE_API_HOST: &str = "eu-store-api.bambulab.com";
 const STORE_API_PATH: &str = "/mall-goods/product/globalSearchV2";
 const STORE_REGION: &str = "EU";
@@ -35,6 +36,67 @@ const MAX_IMAGE_DIMENSION: u16 = 240;
 pub enum ProductImageSource {
     SdCard,
     BambuCdn,
+    OpenPrintTagCdn,
+}
+
+pub async fn load_openprinttag_image(
+    framework: Rc<RefCell<Framework>>,
+    cache_key: &str,
+    image_url: &str,
+) -> Result<LoadedProductImage, String> {
+    if cache_key.len() != 8 || !cache_key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("OpenPrintTag image cache key is invalid".to_string());
+    }
+    let cache_path = format!("/filascan/optag/{cache_key}.jpg");
+    let file_store = framework.borrow().file_store();
+    let sdcard_available = file_store.lock().await.card_installed;
+    if sdcard_available {
+        if let Ok(encoded) = file_store.lock().await.read_file_bytes(&cache_path).await {
+            if encoded.len() <= MAX_IMAGE_BYTES {
+                if let Ok(image) = decode_jpeg(&encoded) {
+                    return Ok(LoadedProductImage {
+                        image,
+                        source: ProductImageSource::SdCard,
+                    });
+                }
+            }
+        }
+    }
+
+    if framework.borrow().wifi_ok != Some(true) {
+        return Err("not cached and Wi-Fi is not connected".to_string());
+    }
+    let (host, source_path) = parse_openprinttag_image_url(image_url)?;
+    let optimized_path = format!("/cdn-cgi/image/width=240,format=jpg,quality=80{source_path}");
+    let (stack, tls) = {
+        let framework = framework.borrow();
+        (framework.stack, framework.tls)
+    };
+    let encoded = https_request(
+        stack,
+        tls,
+        host,
+        &optimized_path,
+        Method::Get,
+        &[
+            ("Host", host),
+            ("Accept", "image/jpeg"),
+            ("User-Agent", "FilaScan/0.2 (OpenPrintTag)"),
+            ("Connection", "close"),
+        ],
+        None,
+        GTS_ROOT_R4,
+        MAX_IMAGE_BYTES,
+    )
+    .await?;
+    let image = decode_jpeg(&encoded)?;
+    if sdcard_available {
+        let _ = file_store.lock().await.create_write_file_bytes(&cache_path, &encoded).await;
+    }
+    Ok(LoadedProductImage {
+        image,
+        source: ProductImageSource::OpenPrintTagCdn,
+    })
 }
 
 pub struct LoadedProductImage {
@@ -188,7 +250,7 @@ async fn download_product_image(stack: Stack<'static>, tls: TlsReference<'static
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn https_request(
+pub(crate) async fn https_request(
     stack: Stack<'static>,
     tls: TlsReference<'static>,
     host: &str,
@@ -247,7 +309,7 @@ async fn https_request(
 
     let status = connection.headers().map_err(|error| format!("Invalid HTTP response: {error:?}"))?.code;
     if status != 200 {
-        return Err(format!("Bambu service returned HTTP {status}"));
+        return Err(format!("HTTPS service returned HTTP {status}"));
     }
 
     let mut response = Vec::new();
@@ -261,7 +323,7 @@ async fn https_request(
             break;
         }
         if response.len() + length > max_bytes {
-            return Err(format!("Bambu response exceeds the {max_bytes} byte safety limit"));
+            return Err(format!("HTTPS response exceeds the {max_bytes} byte safety limit"));
         }
         response.extend_from_slice(&chunk[..length]);
     }
@@ -288,6 +350,24 @@ fn parse_bambu_cdn_url(url: &str) -> Result<(&str, &str), String> {
     }
     let path_offset = url.len() - path_without_slash.len() - 1;
     Ok((host, &url[path_offset..]))
+}
+
+fn parse_openprinttag_image_url(url: &str) -> Result<(&str, &str), String> {
+    let rest = url
+        .strip_prefix("https://")
+        .ok_or_else(|| "OpenPrintTag image URL is not HTTPS".to_string())?;
+    let (host, path_without_slash) = rest
+        .split_once('/')
+        .ok_or_else(|| "OpenPrintTag image URL has no path".to_string())?;
+    if host != "files.openprinttag.org" {
+        return Err("OpenPrintTag image URL uses an unsupported host".to_string());
+    }
+    let path_offset = url.len() - path_without_slash.len() - 1;
+    let path = &url[path_offset..];
+    if path.contains("/../") {
+        return Err("OpenPrintTag image URL has an invalid path".to_string());
+    }
+    Ok((host, path))
 }
 
 fn decode_jpeg(encoded: &[u8]) -> Result<Image, String> {

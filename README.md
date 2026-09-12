@@ -27,10 +27,11 @@ OpenPrintTag.
 OpenPrintTag data is decoded independently from the Bambu format and converted
 to the same internal filament model. The display uses the brand, material,
 colors, weights, dimensions, temperature ranges and drying parameters that are
-present on the tag. Unknown CBOR fields and additional NDEF records are skipped
-without rejecting an otherwise valid tag. The parser is tested against the
-official OpenPrintTag sample for specification revision `7e09cc3`; physical tag
-testing is still required.
+present on the tag. A separate NDEF URI or Smart Poster URI is decoded and
+reported in the diagnostics when present. Unknown CBOR fields and unsupported
+additional NDEF records are skipped without rejecting an otherwise valid tag.
+The parser is tested against the official OpenPrintTag sample for specification
+revision `7e09cc3` and has also been verified with a physical Prusament tag.
 
 OpenPrintTag defines exact color values but no separate marketing color-name
 field. For Prusament tags, FilaScan uses the manufacturer's material-name suffix
@@ -109,10 +110,22 @@ must fetch it again. Product images remain Bambu Lab content and are retrieved
 at runtime; they are not included in the firmware image.
 
 Product enrichment is separate from tag decoding. Bambu product images use the
-existing Bambu resolver. OpenPrintTag retains its brand UUID, material UUID,
-GTIN and brand name so manufacturer-specific resolvers, such as a future Prusa
-image provider, can be added without changing the RFID protocol or OpenPrintTag
-parser. No OpenPrintTag manufacturer image provider is enabled yet.
+existing Bambu resolver. For OpenPrintTag, FilaScan derives the database brand
+and material slugs from the tag's brand and material names and requests the
+fixed public endpoint at `https://database.openprinttag.org`. The returned
+material JSON may supply missing colors and temperature parameters, plus tags,
+certifications, density, hardness and transmission distance. Values present on
+the NFC tag take precedence. A missing or unreachable database entry never
+prevents the tag data from being displayed.
+
+OpenPrintTag material metadata is cached under
+`/filascan/optag/<material-hash>.jsn`. The first supported photo URL is accepted
+only from `files.openprinttag.org`, requested through its 240-pixel JPEG image
+endpoint and cached as `/filascan/optag/<material-hash>.jpg`. Both hosts use
+validated HTTPS, fixed host allowlists and response-size limits. Cached data is
+used without Wi-Fi and survives restarts and firmware updates. Cache files do
+not expire automatically. The OpenPrintTag database base URL is intentionally
+fixed and is not exposed as a configuration setting.
 
 ### FilaMan integration
 
@@ -187,7 +200,7 @@ Supported hardware:
 - WT32-SC01 Plus with ESP32-S3 and 16 MB flash
 - PN532 or PN5180 RFID reader connected over SPI
 - ESP32-S3 USB JTAG/serial interface for flashing
-- optional FAT-formatted microSD card for the Bambu catalog and product image caches
+- optional FAT-formatted microSD card for catalog, metadata and product image caches
 
 ### PN532 wiring
 
@@ -337,8 +350,9 @@ FilaScan version in `core/Cargo.toml` must match the numeric part of the tag.
 | `core/src/bambu_spool.rs` | Bambu tag parsing and local product mapping |
 | `core/src/spool.rs` | Manufacturer-neutral filament model and product enrichment identity |
 | `core/src/catalog.rs` | BambuStudio catalog download, validation and SD cache |
+| `core/src/openprinttag_catalog.rs` | Fixed OpenPrintTag database lookup, tag-first enrichment and SD metadata cache |
 | `core/src/filaman.rs` | FilaMan plugin HTTP(S) client and Bambu import payload |
-| `core/src/image_loader.rs` | Restricted Bambu Store lookup, HTTPS image download and JPEG decoding |
+| `core/src/image_loader.rs` | Restricted Bambu/OpenPrintTag image downloads, SD cache and JPEG decoding |
 | `core/src/localization.rs` | Display and web language selection with SD persistence |
 | `core/src/diagnostics.rs` | Bounded in-memory diagnostic log |
 | `core/ui/` | Slint display UI |

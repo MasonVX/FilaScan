@@ -12,6 +12,7 @@ mod diagnostics;
 mod filaman;
 mod image_loader;
 mod localization;
+mod openprinttag_catalog;
 mod settings;
 mod spool;
 mod web_app;
