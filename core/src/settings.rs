@@ -12,11 +12,11 @@ pub const WEB_APP_SECURITY_KEY_LENGTH: usize = 7;
 pub const WEB_APP_SALT: &str = "example_salt";
 pub const WEB_APP_KEY_DERIVATION_ITERATIONS: u32 = 10_000;
 
-pub fn rfid_reader_mode() -> shared::bambu_reader::ReaderMode {
+pub fn rfid_reader_mode() -> shared::reader::ReaderMode {
     match option_env!("FILASCAN_RFID_READER") {
-        Some("pn532") => shared::bambu_reader::ReaderMode::Pn532,
-        Some("pn5180") => shared::bambu_reader::ReaderMode::Pn5180,
-        _ => shared::bambu_reader::ReaderMode::Auto,
+        Some("pn532") => shared::reader::ReaderMode::Pn532,
+        Some("pn5180") => shared::reader::ReaderMode::Pn5180,
+        _ => shared::reader::ReaderMode::Auto,
     }
 }
 

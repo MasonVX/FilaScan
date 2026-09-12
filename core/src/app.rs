@@ -11,7 +11,7 @@ use framework::framework::{Framework, FrameworkObserver, WebConfigMode};
 use framework::utils::SpawnerHeapExt;
 use hashbrown::HashMap;
 use log::{error, info, warn};
-use shared::bambu_reader::{BambuReader, BambuReaderObserver, ReaderEvent, ReaderKind};
+use shared::reader::{ReaderEvent, ReaderKind, RfidReader, RfidReaderObserver};
 use slint::{Color, ComponentHandle, Image, ModelRc, SharedString, VecModel};
 
 use crate::{
@@ -42,7 +42,7 @@ pub struct ReaderController {
     pending_locations: Vec<FilaManLocation>,
     registered_spool_id: Option<u64>,
     current_location_id: Option<u64>,
-    _reader: Rc<RefCell<BambuReader>>,
+    _reader: Rc<RefCell<RfidReader>>,
 }
 
 pub fn init_app(
@@ -55,9 +55,9 @@ pub fn init_app(
     spi_device: ExclusiveDevice<esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Async>, esp_hal::gpio::Output<'static>, embassy_time::Delay>,
     signal: esp_hal::gpio::Input<'static>,
     reset: esp_hal::gpio::Output<'static>,
-    reader_mode: shared::bambu_reader::ReaderMode,
+    reader_mode: shared::reader::ReaderMode,
 ) -> Rc<RefCell<ReaderController>> {
-    let reader = shared::bambu_reader::init(spi_device, signal, reset, reader_mode, framework.borrow().spawner);
+    let reader = shared::reader::init(spi_device, signal, reset, reader_mode, framework.borrow().spawner);
     let controller = Rc::new(RefCell::new(ReaderController {
         ui: ui.clone(),
         framework: framework.clone(),
@@ -113,7 +113,7 @@ pub fn init_app(
         });
     }
 
-    let reader_observer: Rc<RefCell<dyn BambuReaderObserver>> = controller.clone();
+    let reader_observer: Rc<RefCell<dyn RfidReaderObserver>> = controller.clone();
     reader.borrow_mut().subscribe(Rc::downgrade(&reader_observer));
 
     let framework_observer: Rc<RefCell<dyn FrameworkObserver>> = controller.clone();
@@ -737,7 +737,7 @@ impl ReaderController {
     }
 }
 
-impl BambuReaderObserver for ReaderController {
+impl RfidReaderObserver for ReaderController {
     fn on_reader_available(&mut self, reader: Option<ReaderKind>) {
         let ui = self.ui.unwrap();
         let state = ui.global::<ReaderState>();

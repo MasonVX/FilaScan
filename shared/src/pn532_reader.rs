@@ -7,13 +7,13 @@ use hashbrown::HashMap;
 use log::{error, info, warn};
 
 use crate::{
-    bambu_reader::{BambuReader, ReaderEvent, ReaderKind},
+    reader::{ReaderEvent, ReaderKind, RfidReader},
     nfc,
     pn532_ext::Esp32TimerAsync,
 };
 
 pub async fn run(
-    reader: Rc<RefCell<BambuReader>>,
+    reader: Rc<RefCell<RfidReader>>,
     spi_device: ExclusiveDevice<
         esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Async>,
         esp_hal::gpio::Output<'static>,

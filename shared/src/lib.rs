@@ -4,7 +4,7 @@
 // might need to put this under feature flag to compile with std
 extern crate alloc;
 
-pub mod bambu_reader;
+pub mod reader;
 pub mod nfc;
 pub mod pn5180;
 mod pn5180_reader;

@@ -312,7 +312,7 @@ FilaScan version in `core/Cargo.toml` must match the numeric part of the tag.
 | `core/src/diagnostics.rs` | Bounded in-memory diagnostic log |
 | `core/ui/` | Slint display UI |
 | `core/static/` | Protected Wi-Fi, catalog and FilaMan configuration |
-| `shared/src/bambu_reader.rs` | Reader selection and hardware-neutral event interface |
+| `shared/src/reader.rs` | Reader selection and hardware-neutral event interface |
 | `shared/src/pn532_reader.rs` | PN532 detection, ISO-A selection and read recovery |
 | `shared/src/pn5180.rs` | PN5180 SPI, BUSY, RF and MIFARE Classic driver |
 | `shared/src/pn5180_reader.rs` | PN5180 scan loop and Bambu payload reads |

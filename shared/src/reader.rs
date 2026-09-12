@@ -57,17 +57,17 @@ pub enum ReaderEvent {
     TagRemoved,
 }
 
-pub trait BambuReaderObserver {
+pub trait RfidReaderObserver {
     fn on_reader_available(&mut self, reader: Option<ReaderKind>);
     fn on_reader_event(&mut self, event: &ReaderEvent);
 }
 
-pub struct BambuReader {
-    observers: Vec<alloc::rc::Weak<RefCell<dyn BambuReaderObserver>>>,
+pub struct RfidReader {
+    observers: Vec<alloc::rc::Weak<RefCell<dyn RfidReaderObserver>>>,
 }
 
-impl BambuReader {
-    pub fn subscribe(&mut self, observer: alloc::rc::Weak<RefCell<dyn BambuReaderObserver>>) {
+impl RfidReader {
+    pub fn subscribe(&mut self, observer: alloc::rc::Weak<RefCell<dyn RfidReaderObserver>>) {
         self.observers.push(observer);
     }
 
@@ -98,8 +98,8 @@ pub fn init(
     reset: esp_hal::gpio::Output<'static>,
     mode: ReaderMode,
     spawner: Spawner,
-) -> Rc<RefCell<BambuReader>> {
-    let reader = Rc::new(RefCell::new(BambuReader {
+) -> Rc<RefCell<RfidReader>> {
+    let reader = Rc::new(RefCell::new(RfidReader {
         observers: Vec::new(),
     }));
 
@@ -110,7 +110,7 @@ pub fn init(
 }
 
 async fn reader_task(
-    reader: Rc<RefCell<BambuReader>>,
+    reader: Rc<RefCell<RfidReader>>,
     spi_device: ExclusiveDevice<
         esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Async>,
         esp_hal::gpio::Output<'static>,

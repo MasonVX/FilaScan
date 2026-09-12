@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 use log::{error, info, warn};
 
 use crate::{
-    bambu_reader::{BambuReader, ReaderEvent, ReaderKind},
+    reader::{ReaderEvent, ReaderKind, RfidReader},
     nfc,
     pn5180::{Error as Pn5180Error, Pn5180},
 };
@@ -34,7 +34,7 @@ struct PayloadError {
     source: Pn5180Error,
 }
 
-pub async fn run(reader: Rc<RefCell<BambuReader>>, mut pn5180: Device) {
+pub async fn run(reader: Rc<RefCell<RfidReader>>, mut pn5180: Device) {
     if let Err(error) = pn5180.initialize_iso_a().await {
         error!("PN5180 ISO-A initialization failed: {error:?}");
         reader.borrow().notify_available(None);
