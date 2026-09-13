@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>FilaScan Wi-Fi Setup</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -19,12 +20,12 @@
         <pre id="log-output" aria-live="polite">Waiting for diagnostic output…</pre>
       </section>
 
-      <section>
+      <form id="unlock-form">
         <label for="security-key" data-i18n="setupKey">Setup key</label>
         <input id="security-key" type="password" autocomplete="current-password" placeholder="Shown on the FilaScan display">
-        <button id="verify" type="button" data-i18n="unlock">Unlock</button>
+        <button id="verify" type="submit" data-i18n="unlock">Unlock</button>
         <p id="key-status" class="status"></p>
-      </section>
+      </form>
 
       <section id="language" hidden>
         <h2 data-i18n="language">Language</h2>
@@ -379,7 +380,11 @@
         }
       }
 
-      document.querySelector('#verify').addEventListener('click', async () => {
+      document.querySelector('#unlock-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const verifyButton = document.querySelector('#verify');
+        if (verifyButton.disabled) return;
+        verifyButton.disabled = true;
         keyStatus.textContent = tr('Checking key…', 'Schlüssel wird geprüft…');
         languageSection.hidden = true;
         wifiSection.hidden = true;
@@ -417,6 +422,7 @@
           keyStatus.textContent = `${tr('Could not unlock setup', 'Einrichtung konnte nicht entsperrt werden')}: ${error.message}`;
         } finally {
           endForegroundRequest();
+          verifyButton.disabled = false;
         }
       });
 

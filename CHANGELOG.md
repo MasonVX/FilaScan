@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6 - 2026-09-13
+
+- Allow Enter to submit the web setup security code, with duplicate submissions
+  blocked while unlocking.
+- Suppress the inherited website icon in the configuration page.
+
 ## 0.2.5 - 2026-09-13
 
 - Added an explicit, confirmed OTA installation action to the on-device
