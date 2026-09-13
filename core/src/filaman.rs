@@ -19,6 +19,7 @@ use embassy_time::{Duration, Timer, with_timeout};
 use embedded_io_async::{Read, Write};
 use esp_mbedtls::{Certificates, TlsVersion, X509};
 use framework::{framework::Framework, utils::SpawnerHeapExt};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -30,10 +31,14 @@ use crate::{
 // The SD card is mounted without long-file-name support. Keep every path
 // component within the FAT 8.3 limits, including the three-character suffix.
 const SETTINGS_PATH: &str = "/filascan/filaman/settings.jsn";
+const INVENTORY_PATH: &str = "/filascan/filaman/invent.jsn";
+const QUEUE_PATH: &str = "/filascan/filaman/queue.jsn";
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const HEARTBEAT_INITIAL_DELAY: Duration = Duration::from_secs(15);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(20);
+const INVENTORY_REFRESH_HEARTBEATS: u16 = 15;
+const OFFLINE_SCHEMA_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FilaManSettings {
@@ -61,9 +66,13 @@ pub struct FilaManStatus {
     pub registered: bool,
     pub device_id: Option<u64>,
     pub device_name: Option<String>,
+    pub offline: bool,
+    pub cached_spools: usize,
+    pub cached_locations: usize,
+    pub pending_operations: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FilaManLocation {
     pub id: u64,
     pub name: String,
@@ -76,23 +85,18 @@ pub enum SpoolRegistration {
         location_id: Option<u64>,
         location_name: Option<String>,
         locations: Vec<FilaManLocation>,
+        offline: bool,
     },
     New {
         locations: Vec<FilaManLocation>,
+        offline: bool,
+        inventory_known: bool,
     },
-}
-
-#[derive(Debug)]
-pub struct ImportOutcome {
-    pub status: String,
-    pub spool_id: u64,
-}
-
-#[derive(Debug)]
-pub struct MoveOutcome {
-    pub spool_id: u64,
-    pub location_id: u64,
-    pub location_name: String,
+    Pending {
+        location_id: u64,
+        location_name: String,
+        locations: Vec<FilaManLocation>,
+    },
 }
 
 #[derive(Debug)]
@@ -100,9 +104,62 @@ pub struct ArchiveOutcome {
     pub spool_id: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct ExistingSpool {
     id: u64,
     location_id: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct CachedSpool {
+    external_id: String,
+    spool_id: u64,
+    location_id: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct InventorySnapshot {
+    schema: u8,
+    locations: Vec<FilaManLocation>,
+    spools: Vec<CachedSpool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PendingStorage {
+    sequence: u64,
+    spool: FilamentSpool,
+    location_id: u64,
+    location_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct OfflineQueue {
+    schema: u8,
+    next_sequence: u64,
+    operations: Vec<PendingStorage>,
+}
+
+impl Default for OfflineQueue {
+    fn default() -> Self {
+        Self {
+            schema: OFFLINE_SCHEMA_VERSION,
+            next_sequence: 1,
+            operations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum StorageOutcome {
+    Applied {
+        spool_id: u64,
+        location_id: u64,
+        location_name: String,
+    },
+    Queued {
+        location_id: u64,
+        location_name: String,
+    },
 }
 
 pub struct FilaManService {
@@ -114,6 +171,12 @@ pub struct FilaManService {
     busy: Cell<bool>,
     heartbeat_succeeded: Cell<bool>,
     heartbeat_failure_active: Cell<bool>,
+    inventory: RefCell<Option<InventorySnapshot>>,
+    inventory_index: RefCell<HashMap<String, ExistingSpool>>,
+    inventory_serialized: RefCell<Vec<u8>>,
+    offline_queue: RefCell<OfflineQueue>,
+    queue_serialized: RefCell<Vec<u8>>,
+    inventory_refresh_ticks: Cell<u16>,
     sdcard_available: bool,
 }
 
@@ -128,6 +191,12 @@ impl FilaManService {
             busy: Cell::new(false),
             heartbeat_succeeded: Cell::new(false),
             heartbeat_failure_active: Cell::new(false),
+            inventory: RefCell::new(None),
+            inventory_index: RefCell::new(HashMap::new()),
+            inventory_serialized: RefCell::new(Vec::new()),
+            offline_queue: RefCell::new(OfflineQueue::default()),
+            queue_serialized: RefCell::new(Vec::new()),
+            inventory_refresh_ticks: Cell::new(0),
             sdcard_available,
         })
     }
@@ -139,12 +208,17 @@ impl FilaManService {
     pub fn status(&self) -> FilaManStatus {
         let settings = self.settings.borrow();
         let device_id = device_id_from_token(&settings.device_token);
+        let inventory = self.inventory.borrow();
         FilaManStatus {
             state: self.state.borrow().clone(),
             busy: self.busy.get(),
             registered: device_id.is_some(),
             device_id,
             device_name: self.device_name.borrow().clone(),
+            offline: self.import_enabled() && self.use_offline_inventory(),
+            cached_spools: inventory.as_ref().map(|snapshot| snapshot.spools.len()).unwrap_or(0),
+            cached_locations: inventory.as_ref().map(|snapshot| snapshot.locations.len()).unwrap_or(0),
+            pending_operations: self.offline_queue.borrow().operations.len(),
         }
     }
 
@@ -153,9 +227,75 @@ impl FilaManService {
         settings.enabled && !settings.device_token.is_empty()
     }
 
+    fn replace_inventory(&self, snapshot: InventorySnapshot, serialized: Vec<u8>) {
+        let mut index = HashMap::with_capacity(snapshot.spools.len());
+        for spool in &snapshot.spools {
+            index.insert(
+                spool.external_id.clone(),
+                ExistingSpool {
+                    id: spool.spool_id,
+                    location_id: spool.location_id,
+                },
+            );
+        }
+        *self.inventory_index.borrow_mut() = index;
+        *self.inventory.borrow_mut() = Some(snapshot);
+        *self.inventory_serialized.borrow_mut() = serialized;
+    }
+
+    fn use_offline_inventory(&self) -> bool {
+        self.local_ipv4_address().is_none() || !self.heartbeat_succeeded.get() || self.heartbeat_failure_active.get()
+    }
+
+    fn cached_registration(&self, spool: &FilamentSpool, offline: bool) -> SpoolRegistration {
+        let external_id = canonical_external_id(spool);
+        let locations = self
+            .inventory
+            .borrow()
+            .as_ref()
+            .map(|snapshot| snapshot.locations.clone())
+            .unwrap_or_default();
+
+        if let Some(operation) = self
+            .offline_queue
+            .borrow()
+            .operations
+            .iter()
+            .find(|operation| canonical_external_id(&operation.spool) == external_id)
+        {
+            return SpoolRegistration::Pending {
+                location_id: operation.location_id,
+                location_name: operation.location_name.clone(),
+                locations,
+            };
+        }
+
+        if let Some(existing) = self.inventory_index.borrow().get(&external_id).cloned() {
+            let location_name = existing.location_id.and_then(|location_id| {
+                locations
+                    .iter()
+                    .find(|location| location.id == location_id)
+                    .map(|location| location.name.clone())
+            });
+            return SpoolRegistration::Existing {
+                spool_id: existing.id,
+                location_id: existing.location_id,
+                location_name,
+                locations,
+                offline,
+            };
+        }
+
+        SpoolRegistration::New {
+            locations,
+            offline,
+            inventory_known: self.inventory.borrow().is_some(),
+        }
+    }
+
     pub async fn load_from_sd(&self) {
         if !self.sdcard_available {
-            self.log_warn("FilaMan settings cannot be persisted because no SD card is installed");
+            self.log_warn("FilaMan offline data cannot be persisted because no SD card is installed");
             return;
         }
         let file_store = self.framework.borrow().file_store();
@@ -169,6 +309,37 @@ impl FilaManService {
                     self.log_info("FilaMan settings loaded from SD card");
                 }
                 _ => self.log_warn("Ignoring invalid cached FilaMan settings"),
+            }
+        }
+
+        if let Ok(bytes) = file_store.lock().await.read_file_bytes(INVENTORY_PATH).await {
+            match serde_json::from_slice::<InventorySnapshot>(&bytes) {
+                Ok(snapshot) if snapshot.schema == OFFLINE_SCHEMA_VERSION => {
+                    self.replace_inventory(snapshot, bytes);
+                    let inventory = self.inventory.borrow();
+                    if let Some(inventory) = inventory.as_ref() {
+                        self.log_info(&format!(
+                            "FilaMan offline inventory loaded from SD card: {} spools, {} locations",
+                            inventory.spools.len(),
+                            inventory.locations.len()
+                        ));
+                    }
+                }
+                _ => self.log_warn("Ignoring invalid cached FilaMan inventory"),
+            }
+        }
+
+        if let Ok(bytes) = file_store.lock().await.read_file_bytes(QUEUE_PATH).await {
+            match serde_json::from_slice::<OfflineQueue>(&bytes) {
+                Ok(queue) if queue.schema == OFFLINE_SCHEMA_VERSION => {
+                    let count = queue.operations.len();
+                    *self.offline_queue.borrow_mut() = queue;
+                    *self.queue_serialized.borrow_mut() = bytes;
+                    if count > 0 {
+                        self.log_info(&format!("FilaMan offline queue loaded from SD card: {count} pending operations"));
+                    }
+                }
+                _ => self.log_warn("Ignoring invalid FilaMan offline queue"),
             }
         }
     }
@@ -215,6 +386,7 @@ impl FilaManService {
                 } else if recovered {
                     self.log_info(&format!("FilaMan heartbeat recovered; reporting local IP {ip_address}"));
                 }
+                self.run_online_maintenance(first_success || recovered).await;
                 return;
             }
             Ok(Ok(_)) => "FilaMan returned an invalid heartbeat response".to_string(),
@@ -227,8 +399,122 @@ impl FilaManService {
         }
     }
 
+    async fn run_online_maintenance(&self, force_inventory_refresh: bool) {
+        let queue_changed = self.synchronize_offline_queue().await;
+        let ticks = self.inventory_refresh_ticks.get().saturating_add(1);
+        let refresh_due = force_inventory_refresh || queue_changed || ticks >= INVENTORY_REFRESH_HEARTBEATS;
+        if refresh_due {
+            self.inventory_refresh_ticks.set(0);
+            if let Err(error) = self.refresh_inventory().await {
+                self.log_warn(&format!("FilaMan inventory refresh failed: {error}"));
+            }
+        } else {
+            self.inventory_refresh_ticks.set(ticks);
+        }
+    }
+
+    async fn refresh_inventory(&self) -> Result<(), String> {
+        if self.busy.replace(true) {
+            return Err("Another FilaMan request is already running".to_string());
+        }
+        let result = async {
+            let mut locations = self.load_locations().await?;
+            let mut spools = self.load_inventory_spools().await?;
+            locations.sort_by_key(|location| location.id);
+            locations.dedup_by_key(|location| location.id);
+            spools.sort_by(|left, right| left.external_id.cmp(&right.external_id));
+            spools.dedup_by(|left, right| left.external_id == right.external_id);
+            let snapshot = InventorySnapshot {
+                schema: OFFLINE_SCHEMA_VERSION,
+                locations,
+                spools,
+            };
+            let serialized = serde_json::to_vec(&snapshot).map_err(|error| format!("inventory serialization failed: {error}"))?;
+            let changed = serialized.as_slice() != self.inventory_serialized.borrow().as_slice();
+            if changed && self.sdcard_available {
+                let file_store = self.framework.borrow().file_store();
+                file_store
+                    .lock()
+                    .await
+                    .create_write_file_bytes(INVENTORY_PATH, &serialized)
+                    .await
+                    .map_err(|error| format!("SD write failed: {error:?}"))?;
+            }
+            let spool_count = snapshot.spools.len();
+            let location_count = snapshot.locations.len();
+            self.replace_inventory(snapshot, serialized);
+            if changed {
+                self.log_info(&format!(
+                    "FilaMan inventory refreshed: {spool_count} spools, {location_count} locations; snapshot {}",
+                    if self.sdcard_available { "written to SD card" } else { "kept in RAM" }
+                ));
+            } else {
+                self.log_info(&format!(
+                    "FilaMan inventory unchanged: {spool_count} spools, {location_count} locations; SD write skipped"
+                ));
+            }
+            Ok(())
+        }
+        .await;
+        self.busy.set(false);
+        result
+    }
+
+    async fn synchronize_offline_queue(&self) -> bool {
+        let operations = self.offline_queue.borrow().operations.clone();
+        if operations.is_empty() || self.busy.replace(true) {
+            return false;
+        }
+
+        self.log_info(&format!("Synchronizing {} queued FilaMan operations", operations.len()));
+        let mut remaining = Vec::new();
+        let mut completed = 0usize;
+        let mut stop_after_failure = false;
+        for operation in operations {
+            if stop_after_failure {
+                remaining.push(operation);
+                continue;
+            }
+            match self
+                .apply_storage_online(&operation.spool, operation.location_id, &operation.location_name)
+                .await
+            {
+                Ok(spool_id) => {
+                    completed += 1;
+                    self.log_info(&format!(
+                        "FilaMan offline operation {} synchronized as spool {spool_id} at {}",
+                        operation.sequence, operation.location_name
+                    ));
+                }
+                Err(error) => {
+                    stop_after_failure = is_transport_error(&error);
+                    self.log_warn(&format!("FilaMan offline operation {} remains queued: {error}", operation.sequence));
+                    remaining.push(operation);
+                }
+            }
+        }
+        self.busy.set(false);
+
+        if completed == 0 {
+            return false;
+        }
+        let mut queue = self.offline_queue.borrow().clone();
+        queue.operations = remaining;
+        match self.persist_queue(queue).await {
+            Ok(true) => true,
+            Ok(false) => false,
+            Err(error) => {
+                self.log_warn(&format!("Could not persist synchronized FilaMan queue: {error}"));
+                false
+            }
+        }
+    }
+
     fn local_ipv4_address(&self) -> Option<String> {
         let stack = self.framework.borrow().stack;
+        if !stack.is_link_up() {
+            return None;
+        }
         stack.config_v4().map(|config| config.address.address().to_string())
     }
 
@@ -427,6 +713,20 @@ impl FilaManService {
         if let Err(error) = validate_spool(spool) {
             return Err(error.to_string());
         }
+        if self.use_offline_inventory() {
+            self.log_info(&format!(
+                "FilaMan is offline; resolving external ID {} from the cached inventory",
+                spool.external_id
+            ));
+            return Ok(self.cached_registration(spool, true));
+        }
+        if self.inventory.borrow().is_some() {
+            self.log_info(&format!(
+                "FilaMan: resolving external ID {} from the in-memory inventory",
+                spool.external_id
+            ));
+            return Ok(self.cached_registration(spool, false));
+        }
         if self.busy.replace(true) {
             return Err("Another FilaMan request is already running".to_string());
         }
@@ -447,13 +747,16 @@ impl FilaManService {
                     location_name.as_deref().unwrap_or("no location")
                 ));
             }
-            Ok(SpoolRegistration::New { locations }) => {
+            Ok(SpoolRegistration::New { locations, .. }) => {
                 *self.state.borrow_mut() = format!("Choose one of {} locations", locations.len());
                 self.log_info(&format!(
                     "FilaMan: external ID {} is new; {} eligible locations available",
                     spool.external_id,
                     locations.len()
                 ));
+            }
+            Ok(SpoolRegistration::Pending { location_name, .. }) => {
+                *self.state.borrow_mut() = format!("Pending synchronization at {location_name}");
             }
             Err(error) => {
                 *self.state.borrow_mut() = format!("Lookup failed: {error}");
@@ -463,89 +766,126 @@ impl FilaManService {
         result
     }
 
-    pub async fn import_spool_at(&self, spool: &FilamentSpool, location_id: u64) -> Result<ImportOutcome, String> {
+    pub async fn store_spool_at(
+        &self,
+        spool: &FilamentSpool,
+        known_spool_id: Option<u64>,
+        location_id: u64,
+        location_name: &str,
+    ) -> Result<StorageOutcome, String> {
         if !self.import_enabled() {
             return Err("FilaMan location-assisted import is disabled".to_string());
         }
-        if let Err(error) = validate_spool(spool) {
-            return Err(error.to_string());
-        }
-        if location_id == 0 {
+        validate_spool(spool).map_err(String::from)?;
+        if location_id == 0 || location_name.trim().is_empty() {
             return Err("FilaMan location is invalid".to_string());
         }
+
+        if self.use_offline_inventory() {
+            self.enqueue_storage(spool, location_id, location_name).await?;
+            return Ok(StorageOutcome::Queued {
+                location_id,
+                location_name: location_name.to_string(),
+            });
+        }
         if self.busy.replace(true) {
             return Err("Another FilaMan request is already running".to_string());
         }
-
-        self.log_info(&format!(
-            "FilaMan: importing external ID {} into location {}",
-            spool.external_id, location_id
-        ));
-        let result = self.import_spool_inner(spool, location_id).await;
+        let result = match known_spool_id {
+            Some(spool_id) => self.move_spool_inner(spool_id, location_id).await.map(|response| response.spool_id),
+            None => self.apply_storage_online(spool, location_id, location_name).await,
+        };
         self.busy.set(false);
-        match &result {
-            Ok(response) => {
-                *self.state.borrow_mut() = format!("{} spool {}", import_status_label(&response.status), response.spool_id);
-                self.log_info(&format!(
-                    "FilaMan: plugin import {} spool {} for external_id {} at location {} (filament {}, manufacturer {}, colors {:?})",
-                    response.status,
-                    response.spool_id,
-                    response.external_id,
+
+        match result {
+            Ok(spool_id) => Ok(StorageOutcome::Applied {
+                spool_id,
+                location_id,
+                location_name: location_name.to_string(),
+            }),
+            Err(error) if is_transport_error(&error) => {
+                self.heartbeat_failure_active.set(true);
+                self.log_warn(&format!("FilaMan became unavailable; preserving the requested location offline: {error}"));
+                self.enqueue_storage(spool, location_id, location_name).await?;
+                Ok(StorageOutcome::Queued {
                     location_id,
-                    response.filament_id,
-                    response.manufacturer_id,
-                    response.color_ids
-                ));
+                    location_name: location_name.to_string(),
+                })
             }
-            Err(error) => {
-                *self.state.borrow_mut() = format!("Import failed: {error}");
-                self.log_warn(&format!(
-                    "FilaMan import failed for external ID {} at location {}: {error}",
-                    spool.external_id, location_id
-                ));
-            }
+            Err(error) => Err(error),
         }
-        result.map(|response| ImportOutcome {
-            status: response.status,
-            spool_id: response.spool_id,
-        })
     }
 
-    pub async fn move_spool(&self, spool_id: u64, location_id: u64) -> Result<MoveOutcome, String> {
-        if !self.import_enabled() {
-            return Err("FilaMan location-assisted import is disabled".to_string());
-        }
-        if spool_id == 0 || location_id == 0 {
-            return Err("FilaMan spool or location is invalid".to_string());
-        }
-        if self.busy.replace(true) {
-            return Err("Another FilaMan request is already running".to_string());
+    async fn apply_storage_online(&self, spool: &FilamentSpool, location_id: u64, _location_name: &str) -> Result<u64, String> {
+        if let Some(existing) = self.find_spool(spool).await? {
+            if existing.location_id != Some(location_id) {
+                self.move_spool_inner(existing.id, location_id).await?;
+            }
+            return Ok(existing.id);
         }
 
-        self.log_info(&format!("FilaMan: moving spool {} to location {}", spool_id, location_id));
-        let result = self.move_spool_inner(spool_id, location_id).await;
-        self.busy.set(false);
-        match &result {
-            Ok(response) => {
-                *self.state.borrow_mut() = format!("Moved spool {}", response.spool_id);
-                self.log_info(&format!(
-                    "FilaMan: moved spool {} to location {} ({})",
-                    response.spool_id, response.location_id, response.location_name
-                ));
-            }
-            Err(error) => {
-                *self.state.borrow_mut() = format!("Move failed: {error}");
-                self.log_warn(&format!(
-                    "FilaMan move failed for spool {} to location {}: {error}",
-                    spool_id, location_id
-                ));
-            }
+        let response = self.import_spool_inner(spool, location_id).await?;
+        if response.status != "created" {
+            self.move_spool_inner(response.spool_id, location_id).await?;
         }
-        result.map(|response| MoveOutcome {
-            spool_id: response.spool_id,
-            location_id: response.location_id,
-            location_name: response.location_name,
-        })
+        Ok(response.spool_id)
+    }
+
+    async fn enqueue_storage(&self, spool: &FilamentSpool, location_id: u64, location_name: &str) -> Result<(), String> {
+        if !self.sdcard_available {
+            return Err("Offline storage requires an SD card".to_string());
+        }
+        let external_id = canonical_external_id(spool);
+        let mut queue = self.offline_queue.borrow().clone();
+        if let Some(existing) = queue
+            .operations
+            .iter_mut()
+            .find(|operation| canonical_external_id(&operation.spool) == external_id)
+        {
+            existing.spool = spool.clone();
+            existing.location_id = location_id;
+            existing.location_name = location_name.to_string();
+        } else {
+            let sequence = queue.next_sequence;
+            queue.next_sequence = queue.next_sequence.saturating_add(1);
+            queue.operations.push(PendingStorage {
+                sequence,
+                spool: spool.clone(),
+                location_id,
+                location_name: location_name.to_string(),
+            });
+        }
+        let changed = self.persist_queue(queue).await?;
+        if changed {
+            self.log_info(&format!(
+                "FilaMan operation queued offline for external ID {} at {}",
+                spool.external_id, location_name
+            ));
+        } else {
+            self.log_info(&format!(
+                "FilaMan offline operation for external ID {} is unchanged; SD write skipped",
+                spool.external_id
+            ));
+        }
+        Ok(())
+    }
+
+    async fn persist_queue(&self, queue: OfflineQueue) -> Result<bool, String> {
+        let serialized = serde_json::to_vec(&queue).map_err(|error| format!("queue serialization failed: {error}"))?;
+        if serialized.as_slice() == self.queue_serialized.borrow().as_slice() {
+            *self.offline_queue.borrow_mut() = queue;
+            return Ok(false);
+        }
+        let file_store = self.framework.borrow().file_store();
+        file_store
+            .lock()
+            .await
+            .create_write_file_bytes(QUEUE_PATH, &serialized)
+            .await
+            .map_err(|error| format!("SD write failed: {error:?}"))?;
+        *self.offline_queue.borrow_mut() = queue;
+        *self.queue_serialized.borrow_mut() = serialized;
+        Ok(true)
     }
 
     pub async fn archive_spool(&self, spool_id: u64) -> Result<ArchiveOutcome, String> {
@@ -597,10 +937,13 @@ impl FilaManService {
                 location_id: existing.location_id,
                 location_name,
                 locations: self.load_locations().await?,
+                offline: false,
             });
         }
         Ok(SpoolRegistration::New {
             locations: self.load_locations().await?,
+            offline: false,
+            inventory_known: true,
         })
     }
 
@@ -678,6 +1021,39 @@ impl FilaManService {
             }
         }
         Err("FilaMan location list exceeds 4000 entries".to_string())
+    }
+
+    async fn load_inventory_spools(&self) -> Result<Vec<CachedSpool>, String> {
+        let mut spools = Vec::new();
+        for page in 1..=100 {
+            let response = self.api_get(&format!("/spools?page={page}&page_size=50&include_archived=false")).await?;
+            let items = response
+                .get("items")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "FilaMan spool list response is invalid".to_string())?;
+            for item in items {
+                let Some(external_id) = item
+                    .get("external_id")
+                    .and_then(Value::as_str)
+                    .and_then(canonicalize_remote_external_id)
+                else {
+                    continue;
+                };
+                let Some(spool_id) = item.get("id").and_then(Value::as_u64).filter(|id| *id > 0) else {
+                    continue;
+                };
+                spools.push(CachedSpool {
+                    external_id,
+                    spool_id,
+                    location_id: item.get("location_id").and_then(Value::as_u64),
+                });
+            }
+            let total = response.get("total").and_then(Value::as_u64).unwrap_or(items.len() as u64);
+            if page as u64 * 50 >= total {
+                return Ok(spools);
+            }
+        }
+        Err("FilaMan spool list exceeds 5000 entries".to_string())
     }
 
     async fn import_spool_inner(&self, spool: &FilamentSpool, location_id: u64) -> Result<ImportResponse, String> {
@@ -876,9 +1252,6 @@ impl FilaManService {
 struct ImportResponse {
     status: String,
     spool_id: u64,
-    filament_id: u64,
-    manufacturer_id: u64,
-    color_ids: Vec<u64>,
     external_id: String,
 }
 
@@ -887,7 +1260,6 @@ struct MoveResponse {
     status: String,
     spool_id: u64,
     location_id: u64,
-    location_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1067,6 +1439,36 @@ fn canonical_external_id(spool: &FilamentSpool) -> String {
     }
 }
 
+fn canonicalize_remote_external_id(value: &str) -> Option<String> {
+    let value = value.trim();
+    if let Some(id) = value.strip_prefix("bambulab:") {
+        return (!id.is_empty()).then(|| format!("bambulab:{}", id.to_ascii_uppercase()));
+    }
+    if let Some(id) = value.strip_prefix("openprinttag:") {
+        return (!id.is_empty()).then(|| format!("openprinttag:{}", id.to_ascii_lowercase()));
+    }
+    if value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Some(format!("bambulab:{}", value.to_ascii_uppercase()));
+    }
+    if value.len() == 36 {
+        return Some(format!("openprinttag:{}", value.to_ascii_lowercase()));
+    }
+    None
+}
+
+fn is_transport_error(error: &str) -> bool {
+    error.starts_with("DNS lookup failed")
+        || error.starts_with("DNS lookup returned")
+        || error.starts_with("HTTP request failed")
+        || error.starts_with("HTTP body write failed")
+        || error.starts_with("HTTP response failed")
+        || error.starts_with("HTTPS request failed")
+        || error.starts_with("HTTPS body write failed")
+        || error.starts_with("HTTPS response failed")
+        || error.starts_with("FilaMan response read failed")
+        || error.contains("request timed out")
+}
+
 fn import_payload(spool: &FilamentSpool, location_id: u64) -> Result<(&'static str, Value), String> {
     match &spool.product_reference {
         ProductReference::Bambu {
@@ -1161,15 +1563,6 @@ fn is_ineligible_location(location: &Value) -> bool {
         .map(|value| value.to_ascii_lowercase().ends_with("_plugin"))
         .unwrap_or(false);
     external_identifier || driver_managed
-}
-
-fn import_status_label(status: &str) -> &'static str {
-    match status {
-        "created" => "Created",
-        "existing" => "Found",
-        "updated" => "Updated",
-        _ => "Imported",
-    }
 }
 
 fn truncate(value: &str, max: usize) -> &str {

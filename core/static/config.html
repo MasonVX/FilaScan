@@ -331,7 +331,10 @@
       }
 
       function renderFilaManStatus(config) {
-        filamanStatus.textContent = `${config.busy ? tr('Working', 'In Arbeit') : config.state} · ${config.enabled ? tr('location selection enabled', 'Standortauswahl aktiviert') : tr('location selection disabled', 'Standortauswahl deaktiviert')}`;
+        const connection = config.offline ? tr('offline', 'offline') : tr('online', 'online');
+        const cache = `${config.cached_spools || 0} ${tr('spools', 'Spulen')}, ${config.cached_locations || 0} ${tr('locations cached', 'Standorte im Cache')}`;
+        const pending = `${config.pending_operations || 0} ${tr('pending', 'ausstehend')}`;
+        filamanStatus.textContent = `${config.busy ? tr('Working', 'In Arbeit') : config.state} · ${connection} · ${cache} · ${pending} · ${config.enabled ? tr('location selection enabled', 'Standortauswahl aktiviert') : tr('location selection disabled', 'Standortauswahl deaktiviert')}`;
         filamanRegistrationForm.hidden = config.registered === true;
         filamanRegistrationStatus.hidden = config.registered !== true;
         const fallbackIdentity = config.device_id ? `${translations[currentLanguage].deviceLabel} #${config.device_id}` : translations[currentLanguage].deviceLabel;

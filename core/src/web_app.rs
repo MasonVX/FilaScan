@@ -163,6 +163,10 @@ impl AppWithStateBuilder for WifiAppBuilder {
                         registered: status.registered,
                         device_id: status.device_id,
                         device_name: status.device_name,
+                        offline: status.offline,
+                        cached_spools: status.cached_spools,
+                        cached_locations: status.cached_locations,
+                        pending_operations: status.pending_operations,
                     }
                     .encrypt(&key.borrow()),
                 )
@@ -275,6 +279,10 @@ struct FilaManConfigResponse {
     registered: bool,
     device_id: Option<u64>,
     device_name: Option<String>,
+    offline: bool,
+    cached_spools: usize,
+    cached_locations: usize,
+    pending_operations: usize,
 }
 
 #[derive(Deserialize)]

@@ -326,7 +326,7 @@ component LocationSelectionView inherits Rectangle {
             }
         }
 
-        if ReaderState.moving-existing-spool: ActionButton {
+        if ReaderState.moving-existing-spool && !ReaderState.offline-pending: ActionButton {
             label: ReaderState.filaman-busy
                 ? (ReaderState.german ? "Bitte warten…" : "Please wait…")
                 : ReaderState.confirming-archive

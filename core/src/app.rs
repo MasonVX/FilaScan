@@ -18,7 +18,7 @@ use crate::{
     bambu_spool::BambuSpool,
     catalog::Catalog,
     diagnostics::LogBuffer,
-    filaman::{ArchiveOutcome, FilaManLocation, FilaManService, ImportOutcome, MoveOutcome, SpoolRegistration},
+    filaman::{ArchiveOutcome, FilaManLocation, FilaManService, SpoolRegistration, StorageOutcome},
     image_loader,
     localization::{self, Language, LocalizationService},
     openprinttag_catalog,
@@ -40,10 +40,12 @@ pub struct ReaderController {
     localization: Rc<LocalizationService>,
     self_ref: Weak<RefCell<ReaderController>>,
     active_tray_uid: String,
+    active_spool: Option<FilamentSpool>,
     pending_spool: Option<FilamentSpool>,
     pending_locations: Vec<FilaManLocation>,
     registered_spool_id: Option<u64>,
     current_location_id: Option<u64>,
+    offline_pending: bool,
     _reader: Rc<RefCell<RfidReader>>,
 }
 
@@ -69,10 +71,12 @@ pub fn init_app(
         localization,
         self_ref: Weak::new(),
         active_tray_uid: String::new(),
+        active_spool: None,
         pending_spool: None,
         pending_locations: Vec::new(),
         registered_spool_id: None,
         current_location_id: None,
+        offline_pending: false,
         _reader: reader.clone(),
     }));
     controller.borrow_mut().self_ref = Rc::downgrade(&controller);
@@ -184,9 +188,11 @@ impl ReaderController {
         self.pending_locations.clear();
         self.registered_spool_id = None;
         self.current_location_id = None;
+        self.offline_pending = false;
         let window = self.ui.unwrap();
         let state = window.global::<ReaderState>();
         state.set_has_location_action(false);
+        state.set_offline_pending(false);
         state.set_current_location_label("".into());
         state.set_locations(ModelRc::new(VecModel::from(Vec::<LocationChoice>::new())));
         self.close_location_selection();
@@ -259,7 +265,10 @@ impl ReaderController {
                 location_id,
                 location_name,
                 locations,
+                offline,
             }) => {
+                self.offline_pending = false;
+                state.set_offline_pending(false);
                 self.pending_spool = None;
                 self.pending_locations = locations;
                 self.registered_spool_id = Some(spool_id);
@@ -276,7 +285,11 @@ impl ReaderController {
                 state.set_has_location_action(true);
                 self.close_location_selection();
                 state.set_status_text(
-                    if self.language() == Language::German {
+                    if offline && self.language() == Language::German {
+                        format!("Offline-Inventar: Spule #{spool_id}")
+                    } else if offline {
+                        format!("Offline inventory: spool #{spool_id}")
+                    } else if self.language() == Language::German {
                         format!("Bereits als Spule #{spool_id} in FilaMan registriert")
                     } else {
                         format!("Already registered in FilaMan as spool #{spool_id}")
@@ -284,24 +297,76 @@ impl ReaderController {
                     .into(),
                 );
             }
-            Ok(SpoolRegistration::New { locations }) => {
+            Ok(SpoolRegistration::New {
+                locations,
+                offline,
+                inventory_known,
+            }) => {
+                self.offline_pending = false;
+                state.set_offline_pending(false);
                 self.pending_spool = Some(spool);
                 self.pending_locations = locations;
                 self.update_location_choices();
                 state.set_location_prompt(
                     if self.pending_locations.is_empty() {
-                        self.t(
+                        if offline && !inventory_known {
+                            self.t(
+                                "Offline inventory is not available yet",
+                                "Offline-Inventar ist noch nicht verfügbar",
+                            )
+                        } else {
+                            self.t(
                             "No eligible FilaMan locations are available",
                             "Keine geeigneten FilaMan-Standorte verfügbar",
-                        )
+                            )
+                        }
                     } else {
-                        self.t("Choose where this spool will be stored", "Wähle den Lagerort für diese Spule")
+                        if offline {
+                            self.t(
+                                "Offline: choose a location to store for later synchronization",
+                                "Offline: Lagerort für die spätere Synchronisierung auswählen",
+                            )
+                        } else {
+                            self.t("Choose where this spool will be stored", "Wähle den Lagerort für diese Spule")
+                        }
                     }
                     .into(),
                 );
                 state.set_choosing_location(true);
-                state.set_status_text(self.t("New spool: choose a storage location", "Neue Spule: Lagerort auswählen").into());
+                state.set_status_text(
+                    if offline {
+                        self.t("Offline mode: choose a storage location", "Offline-Modus: Lagerort auswählen")
+                    } else {
+                        self.t("New spool: choose a storage location", "Neue Spule: Lagerort auswählen")
+                    }
+                    .into(),
+                );
                 self.framework.borrow().undim_display();
+            }
+            Ok(SpoolRegistration::Pending {
+                location_id,
+                location_name,
+                locations,
+            }) => {
+                self.offline_pending = true;
+                state.set_offline_pending(true);
+                self.pending_spool = Some(spool);
+                self.pending_locations = locations;
+                self.registered_spool_id = None;
+                self.current_location_id = Some(location_id);
+                self.update_location_choices();
+                state.set_current_location_label(
+                    format!("{}: {}", self.t("Pending synchronization", "Synchronisierung ausstehend"), location_name).into(),
+                );
+                state.set_has_location_action(true);
+                self.close_location_selection();
+                state.set_status_text(
+                    self.t(
+                        "Stored offline; location will be synchronized later",
+                        "Offline gespeichert; Standort wird später synchronisiert",
+                    )
+                    .into(),
+                );
             }
             Err(error) => {
                 self.reset_filaman_context();
@@ -320,7 +385,7 @@ impl ReaderController {
     fn open_location_management(&mut self) {
         let window = self.ui.unwrap();
         let state = window.global::<ReaderState>();
-        if state.get_filaman_busy() || self.registered_spool_id.is_none() {
+        if state.get_filaman_busy() || (self.registered_spool_id.is_none() && self.pending_spool.is_none()) {
             return;
         }
         self.update_location_choices();
@@ -363,25 +428,20 @@ impl ReaderController {
         let service = self.filaman.clone();
         let weak = self.self_ref.clone();
         let spawner = self.framework.borrow().spawner;
-        let spawn_result = if let Some(spool) = self.pending_spool.clone() {
-            spawner.spawn_heap(async move {
-                let result = service.import_spool_at(&spool, location.id).await;
-                if let Some(controller) = weak.upgrade() {
-                    controller.borrow_mut().finish_spool_import(spool, location, result);
-                }
-            })
-        } else if let Some(spool_id) = self.registered_spool_id {
-            spawner.spawn_heap(async move {
-                let result = service.move_spool(spool_id, location.id).await;
-                if let Some(controller) = weak.upgrade() {
-                    controller.borrow_mut().finish_spool_move(location, result);
-                }
-            })
-        } else {
+        let Some(spool) = self.pending_spool.clone().or_else(|| self.active_spool.clone()) else {
             state.set_filaman_busy(false);
-            self.log_warn("Ignoring FilaMan location selection without a pending or registered spool");
+            self.log_warn("Ignoring FilaMan location selection without an active spool");
             return;
         };
+        let known_spool_id = self.registered_spool_id;
+        let spawn_result = spawner.spawn_heap(async move {
+            let result = service
+                .store_spool_at(&spool, known_spool_id, location.id, &location.name)
+                .await;
+            if let Some(controller) = weak.upgrade() {
+                controller.borrow_mut().finish_spool_storage(spool, location, result);
+            }
+        });
         if spawn_result.is_err() {
             state.set_filaman_busy(false);
             state.set_location_prompt(
@@ -395,86 +455,71 @@ impl ReaderController {
         }
     }
 
-    fn finish_spool_import(&mut self, spool: FilamentSpool, location: FilaManLocation, result: Result<ImportOutcome, String>) {
+    fn finish_spool_storage(&mut self, spool: FilamentSpool, location: FilaManLocation, result: Result<StorageOutcome, String>) {
         let window = self.ui.unwrap();
         let state = window.global::<ReaderState>();
         state.set_filaman_busy(false);
         match result {
-            Ok(outcome) => {
-                if outcome.status != "created" {
-                    self.close_location_selection();
-                    self.start_filaman_preparation(spool);
-                    return;
-                }
+            Ok(StorageOutcome::Applied {
+                spool_id,
+                location_id,
+                location_name,
+            }) => {
+                self.offline_pending = false;
+                state.set_offline_pending(false);
                 self.pending_spool = None;
-                self.registered_spool_id = Some(outcome.spool_id);
-                self.current_location_id = Some(location.id);
+                self.registered_spool_id = Some(spool_id);
+                self.current_location_id = Some(location_id);
                 self.update_location_choices();
-                state.set_current_location_label(format!("{}: {}", self.t("Location", "Standort"), location.name).into());
+                state.set_current_location_label(
+                    format!("{}: {}", self.t("Location", "Standort"), location_name).into(),
+                );
                 state.set_has_location_action(true);
                 self.close_location_selection();
-                let message = if self.language() == Language::German {
-                    format!("Spule #{} zu {} hinzugefügt", outcome.spool_id, location.name)
-                } else {
-                    format!("Added spool #{} to {}", outcome.spool_id, location.name)
-                };
-                state.set_status_text(message.into());
+                state.set_status_text(
+                    if self.language() == Language::German {
+                        format!("Spule #{spool_id} bei {location_name} gespeichert")
+                    } else {
+                        format!("Stored spool #{spool_id} at {location_name}")
+                    }
+                    .into(),
+                );
+            }
+            Ok(StorageOutcome::Queued {
+                location_id,
+                location_name,
+            }) => {
+                self.offline_pending = true;
+                state.set_offline_pending(true);
+                self.pending_spool = Some(spool);
+                self.registered_spool_id = None;
+                self.current_location_id = Some(location_id);
+                self.update_location_choices();
+                state.set_current_location_label(
+                    format!("{}: {}", self.t("Pending synchronization", "Synchronisierung ausstehend"), location_name).into(),
+                );
+                state.set_has_location_action(true);
+                self.close_location_selection();
+                state.set_status_text(
+                    self.t(
+                        "Stored offline; location will be synchronized later",
+                        "Offline gespeichert; Standort wird später synchronisiert",
+                    )
+                    .into(),
+                );
             }
             Err(error) => {
                 self.pending_spool = Some(spool);
                 state.set_choosing_location(true);
                 state.set_location_prompt(
                     self.t(
-                        "Import failed. Choose a location to retry or cancel",
-                        "Import fehlgeschlagen. Standort zum Wiederholen wählen oder abbrechen",
+                        "Storage failed. Choose a location to retry or cancel",
+                        "Speichern fehlgeschlagen. Standort erneut wählen oder abbrechen",
                     )
                     .into(),
                 );
-                state.set_status_text(
-                    self.t(
-                        "FilaMan import failed; spool was not added",
-                        "FilaMan-Import fehlgeschlagen; Spule wurde nicht hinzugefügt",
-                    )
-                    .into(),
-                );
-                self.log_warn(&format!("FilaMan import can be retried after failure: {error}"));
-            }
-        }
-    }
-
-    fn finish_spool_move(&mut self, location: FilaManLocation, result: Result<MoveOutcome, String>) {
-        let window = self.ui.unwrap();
-        let state = window.global::<ReaderState>();
-        state.set_filaman_busy(false);
-        match result {
-            Ok(outcome) => {
-                self.registered_spool_id = Some(outcome.spool_id);
-                self.current_location_id = Some(outcome.location_id);
-                self.update_location_choices();
-                state.set_current_location_label(format!("{}: {}", self.t("Location", "Standort"), outcome.location_name).into());
-                state.set_has_location_action(true);
-                self.close_location_selection();
-                state.set_status_text(
-                    if self.language() == Language::German {
-                        format!("Spule #{} nach {} verschoben", outcome.spool_id, outcome.location_name)
-                    } else {
-                        format!("Moved spool #{} to {}", outcome.spool_id, outcome.location_name)
-                    }
-                    .into(),
-                );
-            }
-            Err(error) => {
-                state.set_moving_existing_spool(true);
-                state.set_choosing_location(true);
-                state.set_location_prompt(
-                    self.t(
-                        "Move failed. Choose a location to retry or cancel",
-                        "Verschieben fehlgeschlagen. Standort zum Wiederholen wählen oder abbrechen",
-                    )
-                    .into(),
-                );
-                state.set_status_text(self.t("FilaMan location update failed", "FilaMan-Standortänderung fehlgeschlagen").into());
-                self.log_warn(&format!("FilaMan spool move to {} can be retried: {error}", location.name));
+                state.set_status_text(self.t("FilaMan storage failed", "FilaMan-Speichern fehlgeschlagen").into());
+                self.log_warn(&format!("FilaMan storage at {} can be retried: {error}", location.name));
             }
         }
     }
@@ -583,6 +628,18 @@ impl ReaderController {
             );
             return;
         }
+        if self.offline_pending {
+            self.log_info("FilaMan offline location change cancelled by user");
+            self.close_location_selection();
+            state.set_status_text(
+                self.t(
+                    "Offline location unchanged; synchronization remains pending",
+                    "Offline-Standort unverändert; Synchronisierung bleibt ausstehend",
+                )
+                .into(),
+            );
+            return;
+        }
         if self.pending_spool.is_some() {
             self.log_info("FilaMan spool import cancelled by user");
             self.reset_filaman_context();
@@ -604,6 +661,7 @@ impl ReaderController {
 
     fn show_spool(&mut self, spool: &FilamentSpool) {
         self.active_tray_uid = spool.external_id.clone();
+        self.active_spool = Some(spool.clone());
         let ui = self.ui.unwrap();
         let state = ui.global::<ReaderState>();
         state.set_reading(false);

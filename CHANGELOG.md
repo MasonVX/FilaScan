@@ -1,7 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 - 2026-09-13
 
+- Added an SD-backed offline FilaMan mode. FilaScan keeps the active spool and
+  regular-location inventory in RAM, writes the canonical snapshot only when it
+  changes, and queues one desired storage location per spool while disconnected.
+  Pending operations synchronize through the existing import and location
+  endpoints after the FilaMan heartbeat recovers.
+- Added FilaMan cache, connectivity and pending-operation status to the protected
+  web interface.
+- Fixed a nested framework borrow that caused a device panic when an OTA install
+  started from the web interface.
 - Added an on-device firmware page opened by swiping upward from the bottom
   edge. It shows the installed version and checks the GitHub OTA channel whenever
   the page is opened; installation remains in the protected web interface.

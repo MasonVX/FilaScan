@@ -190,6 +190,28 @@ online state and network address. Heartbeats are skipped while another FilaMan
 operation is active. FilaMan marks a device offline after three minutes without
 a heartbeat.
 
+FilaScan also maintains an offline inventory from the existing paginated
+`GET /api/v1/spools` and `GET /api/v1/locations` routes. The active spool IDs,
+locations and canonical external IDs are kept in RAM. A deterministic JSON
+snapshot is written to the SD card only when its serialized contents change;
+unchanged refreshes cause no SD write. The first refresh runs after FilaMan is
+reachable, then at a reduced interval and after queued changes are synchronized.
+
+When Wi-Fi or FilaMan is unavailable, the cached inventory is used to identify
+known spools and display their last synchronized location. Choosing a storage
+location creates or replaces one pending operation for that spool on the SD
+card. The physical NFC Tag UID is excluded from this persisted operation. Once
+the heartbeat recovers, pending operations are applied sequentially through the
+existing FilaScan plugin import and location endpoints. Successful operations
+are removed in one queue update and the inventory snapshot is refreshed. A
+power interruption before that update can only repeat an idempotent operation;
+it cannot silently lose the requested location.
+
+The configuration page reports whether FilaMan is online, the number of cached
+spools and locations, and the number of pending operations. Offline storage
+requires an SD card and a previously downloaded location list. RFID decoding
+and spool display continue to work without either FilaMan or an SD card.
+
 For HTTPS, FilaScan validates the server certificate against the configured
 PEM CA before sending the token or spool data. Direct HTTP URLs are also
 supported for trusted local networks and do not require a CA certificate; the
@@ -205,7 +227,9 @@ Supported hardware:
 - WT32-SC01 Plus with ESP32-S3 and 16 MB flash
 - PN532 or PN5180 RFID reader connected over SPI
 - ESP32-S3 USB JTAG/serial interface for flashing
-- optional FAT-formatted microSD card for catalog, metadata and product image caches
+- FAT-formatted microSD card for offline FilaMan operations, registration data,
+  catalog metadata and product image caches; RFID scanning itself does not
+  require the card
 
 ### PN532 wiring
 

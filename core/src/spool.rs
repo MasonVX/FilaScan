@@ -1,16 +1,17 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use formats::openprinttag::{self, OpenPrintTag};
+use serde::{Deserialize, Serialize};
 
 use crate::bambu_spool::BambuSpool;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum SpoolSource {
     BambuLab,
     OpenPrintTag,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ProductReference {
     Bambu {
         color_code: String,
@@ -30,10 +31,11 @@ pub enum ProductReference {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FilamentSpool {
     pub source: SpoolSource,
     pub external_id: String,
+    #[serde(default, skip_serializing)]
     pub tag_uid: String,
     pub brand: Option<String>,
     pub material_name: String,
