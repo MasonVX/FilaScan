@@ -1,6 +1,6 @@
 [package]
 name = "FilaScan"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 license-file = "../LICENSE.md"
 homepage = "https://github.com/MasonVX/FilaScan"

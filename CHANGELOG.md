@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.7 - 2026-09-13
+
+- Contact FilaMan as soon as Wi-Fi has an IP address; early scans wait for the
+  initial connection check instead of immediately using the offline inventory.
+- Retry pending offline synchronization while connected and serialize queue
+  writes with synchronization. Release the busy state after SD write failures.
+- Show a yellow outlined Offline badge beside the spool status while FilaMan
+  is unavailable, and hide it when connected or integration is disabled.
+- Publish the browser USB installer alongside the OTA channel, with optional
+  internal flash erasure and settings-preserving installation by default.
+
 ## 0.2.6 - 2026-09-13
 
 - Allow Enter to submit the web setup security code, with duplicate submissions
