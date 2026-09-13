@@ -127,6 +127,14 @@ pub fn init_app(
             }
         });
     }
+    {
+        let weak = Rc::downgrade(&controller);
+        ui.unwrap().global::<ReaderState>().on_update_install_confirmed(move || {
+            if let Some(controller) = weak.upgrade() {
+                controller.borrow_mut().install_firmware_update();
+            }
+        });
+    }
 
     let reader_observer: Rc<RefCell<dyn RfidReaderObserver>> = controller.clone();
     reader.borrow_mut().subscribe(Rc::downgrade(&reader_observer));
@@ -167,10 +175,25 @@ impl ReaderController {
         state.set_update_available(false);
         state.set_update_error(false);
         state.set_update_installing(false);
+        state.set_update_confirming(false);
         state.set_available_version("".into());
         state.set_update_error_text("".into());
         self.log_info("Checking for a firmware update from the device display");
         self.framework.borrow().check_firmware_ota();
+    }
+
+    fn install_firmware_update(&mut self) {
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
+        if !state.get_update_available() || state.get_update_installing() {
+            state.set_update_confirming(false);
+            return;
+        }
+
+        state.set_update_confirming(false);
+        state.set_update_installing(true);
+        self.log_info("Firmware update confirmed from the device display");
+        self.framework.borrow().update_firmware_ota();
     }
 
     fn close_location_selection(&self) {
@@ -1097,6 +1120,7 @@ impl FrameworkObserver for ReaderController {
         state.set_update_checking(false);
         state.set_update_available(newer);
         state.set_update_error(false);
+        state.set_update_confirming(false);
         state.set_available_version(version.into());
         if newer {
             self.log_info(&format!("Firmware update available: {version}"));
@@ -1111,6 +1135,7 @@ impl FrameworkObserver for ReaderController {
         state.set_update_checking(false);
         state.set_update_error(false);
         state.set_update_installing(true);
+        state.set_update_confirming(false);
         self.log_info("Firmware update started");
         // Framework OTA notifications are delivered while Framework is mutably borrowed.
         // Updating Slint is safe here, but borrowing Framework again to wake the display
@@ -1128,6 +1153,7 @@ impl FrameworkObserver for ReaderController {
         state.set_update_checking(false);
         state.set_update_error(true);
         state.set_update_installing(false);
+        state.set_update_confirming(false);
         state.set_update_error_text(text.into());
         self.log_error(&format!("Firmware update failed: {}", text.replace('\n', " ")));
         self.render_status(self.t("Firmware update failed", "Firmware-Update fehlgeschlagen"));

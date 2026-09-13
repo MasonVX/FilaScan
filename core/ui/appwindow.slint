@@ -395,6 +395,9 @@ component UpdateView inherits Rectangle {
                 font-size: 19px;
                 text: ReaderState.update-installing
                     ? (ReaderState.german ? "Firmware-Update wird installiert…" : "Installing firmware update…")
+                    : ReaderState.update-confirming
+                        ? (ReaderState.german ? "Version " : "Install version ") + ReaderState.available-version
+                            + (ReaderState.german ? " installieren und neu starten?" : " and restart?")
                     : ReaderState.update-checking
                         ? (ReaderState.german ? "Neue Version wird gesucht…" : "Checking for a new version…")
                         : ReaderState.update-error
@@ -405,15 +408,50 @@ component UpdateView inherits Rectangle {
             }
         }
 
-        HorizontalLayout {
+        if !ReaderState.update-available || ReaderState.update-confirming: HorizontalLayout {
             spacing: 10px;
 
             ActionButton {
-                label: ReaderState.update-checking
-                    ? (ReaderState.german ? "Prüfe…" : "Checking…")
-                    : (ReaderState.german ? "Erneut prüfen" : "Check again");
+                label: ReaderState.update-confirming
+                    ? (ReaderState.german ? "Installieren" : "Install")
+                    : ReaderState.update-checking
+                        ? (ReaderState.german ? "Prüfe…" : "Checking…")
+                        : (ReaderState.german ? "Erneut prüfen" : "Check again");
                 enabled: !ReaderState.update-checking && !ReaderState.update-installing;
-                clicked => { ReaderState.update-page-opened(); }
+                normal-color: ReaderState.update-confirming ? #235f3b : #24506a;
+                clicked => {
+                    if ReaderState.update-confirming {
+                        ReaderState.update-install-confirmed();
+                    } else {
+                        ReaderState.update-page-opened();
+                    }
+                }
+            }
+
+            ActionButton {
+                label: ReaderState.update-confirming
+                    ? (ReaderState.german ? "Abbrechen" : "Cancel")
+                    : (ReaderState.german ? "Zurück" : "Back");
+                enabled: !ReaderState.update-installing;
+                normal-color: #54343a;
+                clicked => {
+                    if ReaderState.update-confirming {
+                        ReaderState.update-confirming = false;
+                    } else {
+                        ReaderState.update-page-visible = false;
+                    }
+                }
+            }
+        }
+
+        if ReaderState.update-available && !ReaderState.update-confirming: HorizontalLayout {
+            spacing: 10px;
+
+            ActionButton {
+                label: ReaderState.german ? "Update installieren" : "Install update";
+                enabled: !ReaderState.update-installing;
+                normal-color: #235f3b;
+                clicked => { ReaderState.update-confirming = true; }
             }
 
             ActionButton {

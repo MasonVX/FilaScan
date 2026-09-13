@@ -54,7 +54,9 @@ export global ReaderState {
     in-out property <bool> update-available: false;
     in-out property <bool> update-error: false;
     in-out property <bool> update-installing: false;
+    in-out property <bool> update-confirming: false;
     in-out property <string> available-version: "";
     in-out property <string> update-error-text: "";
     callback update-page-opened();
+    callback update-install-confirmed();
 }
