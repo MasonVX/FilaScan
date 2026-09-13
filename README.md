@@ -1,22 +1,42 @@
 # FilaScan
 
-FilaScan is firmware for a standalone filament spool reader. It runs
-on a WT32-SC01 Plus with a PN532 or PN5180 RFID reader and shows the spool
-information on the integrated display immediately after a supported tag is scanned.
+FilaScan turns a WT32-SC01 Plus with a PN532 or PN5180 into a standalone
+filament spool reader. Hold a spool against the reader to see its material,
+color, product image and spool parameters, and optionally manage it in FilaMan.
 
-FilaScan is derived from the original
-[yanshay/SpoolEase](https://github.com/yanshay/SpoolEase) implementation through
-the intermediate
-[mybesttools/SpoolEase](https://github.com/mybesttools/SpoolEase) fork. It keeps
-the hardware configuration, display driver, Wi-Fi provisioning foundation and
-Bambu RFID key derivation. The filament inventory, printer and AMS integration,
-MQTT client, spool scale, tag writing, print analysis and SpoolEase web
-applications have been removed.
+- Read Bambu Lab spool tags and OpenPrintTag tags (OpenPrintTag requires PN5180).
+- Display product details, a large color preview and catalog images.
+- Import spools into FilaMan, choose or change their location, and archive them.
+- Queue location choices offline on SD and synchronize when connected again.
+- English and German interfaces, browser configuration and OTA firmware updates.
 
-FilaScan is an independent community project. It is not affiliated with or
-endorsed by Bambu Lab or the SpoolEase maintainers.
+## Installation
 
-## Current functionality
+Connect a **WT32-SC01 Plus with 16 MB flash** by USB and open the
+[online installer](https://masonvx.github.io/FilaScan/) in Chrome or Edge on a
+computer. It guides you through installation, with an option to retain existing
+FilaScan settings. No local build tools are required.
+
+For FilaMan integration, install the
+[FilaScan Import plugin](https://github.com/MasonVX/filascan-import), then
+register and authorize your scanner as described in the plugin README.
+
+## Portable enclosure
+
+The [portable RFID reader project on MakerWorld](https://makerworld.com/en/models/3291128-rdif-reader-portable#profileId-3734282)
+provides a printable enclosure for the scanner.
+
+<img src="docs/images/filascan-portable.png" alt="FilaScan in a portable black enclosure showing a scanned Bambu Lab spool" width="420">
+
+## Project background
+
+FilaScan is a new application built on the code foundation of
+[SpoolEase](https://github.com/yanshay/SpoolEase), via the
+[mybesttools fork](https://github.com/mybesttools/SpoolEase). Its spool-reader
+interface and FilaMan workflows were developed independently. It is a community
+project, not affiliated with Bambu Lab or the SpoolEase maintainers.
+
+## Functionality in detail
 
 FilaScan reads Bambu Lab factory MIFARE Classic 1K tags. With a PN5180 it also
 reads OpenPrintTag NFC-V tags containing an NDEF record with the
@@ -69,7 +89,7 @@ page. It shows the installed version and immediately checks the GitHub-hosted
 OTA channel for a newer release. The page reports whether the firmware is
 current, an update is available or the check failed. Swipe down from the top
 edge or press **Back** to return to the spool reader. Firmware installation
-remains a confirmed action in the protected web interface.
+requires confirmation and can be started on this page or in the protected web interface.
 
 The web interface includes a live diagnostic log for RFID detection, retries,
 read failures and successful spool mappings. Every successful scan prints the
