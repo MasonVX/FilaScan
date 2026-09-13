@@ -1,0 +1,52 @@
+name: Publish web installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - website/**
+      - scripts/prepare-web-installer.py
+      - scripts/test_web_installer.py
+      - .github/workflows/website.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: filascan-pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test settings-preserving packaging
+        run: python3 -m unittest discover -s scripts -p test_web_installer.py
+      - name: Download existing stable firmware
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo "$GITHUB_REPOSITORY" --dir release-assets \
+            --pattern '*.bin' --pattern ota.toml --pattern SHA256SUMS
+          cd release-assets
+          sha256sum --check SHA256SUMS
+      - name: Package installer and unchanged OTA channel
+        run: python3 scripts/prepare-web-installer.py release-assets public
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: public
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

@@ -1,0 +1,20 @@
+:root { color-scheme: dark; font: 17px/1.6 system-ui, sans-serif; background: #10151d; color: #e8eef5; --esp-tools-button-color: #24506a; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+main { max-width: 780px; padding: 32px 22px; margin: auto; }
+header { display: flex; justify-content: space-between; gap: 16px; color: #a9b8c7; font-size: .85rem; }
+h1 { font-size: clamp(2rem, 7vw, 3rem); line-height: 1.15; margin: 42px 0 16px; }
+h2 { font-size: 1.25rem; margin-top: 0; }
+a { color: #72d6ff; }
+.intro { color: #a9b8c7; font-size: 1.15rem; }
+section { padding: 24px; background: #1d2733; border: 1px solid #344250; border-radius: 12px; margin: 22px 0; }
+button { font: inherit; font-weight: 650; padding: 12px 24px; color: white; background: #24506a; border: 1px solid #72d6ff; border-radius: 8px; cursor: pointer; }
+button:hover { background: #32749a; }
+:focus-visible { outline: 3px solid #72d6ff; outline-offset: 4px; }
+dt { font-weight: 650; margin-top: 18px; }
+dd { margin: 5px 0 18px; }
+.notice { border-left: 3px solid #72d6ff; padding-left: 15px; }
+li { margin: 10px 0; }
+summary { cursor: pointer; }
+footer { font-size: .85rem; color: #a9b8c7; padding: 15px 0; }

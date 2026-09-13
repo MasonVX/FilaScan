@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install FilaScan</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <script src="installer.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><a href="https://github.com/MasonVX/FilaScan">FilaScan / GitHub</a><span>USB installer</span></header>
+    <h1>Install FilaScan</h1>
+    <p class="intro">Read Bambu Lab and OpenPrintTag filament spools with a standalone RFID reader.</p>
+    <section>
+      <h2>Connect your reader</h2>
+      <p>For <strong>WT32-SC01 Plus · ESP32-S3 · 16 MB flash</strong> with a PN532 or PN5180 reader. Other ESP32-S3 boards are not supported, even if the installer can connect to them.</p>
+      <ol>
+        <li>Connect the display to your computer using a USB data cable.</li>
+        <li>Close serial monitors and other applications using this USB port.</li>
+        <li>Click Connect, select the device, then choose Install FilaScan.</li>
+      </ol>
+      <p id="version" role="status">Loading release…</p>
+      <esp-web-install-button manifest="manifest.json" id="installer" hidden>
+        <button slot="activate">Connect and install</button>
+        <p slot="unsupported">This browser does not support USB installation. Open this page in Chrome or Edge on a computer.</p>
+        <p slot="not-allowed">USB installation requires HTTPS. Open the official FilaScan installation page.</p>
+      </esp-web-install-button>
+      <noscript>Enable JavaScript to install firmware from this page.</noscript>
+    </section>
+    <section>
+      <h2>Keep settings or start fresh</h2>
+      <p>The installer asks whether to <strong>Erase device</strong>. Leave this unchecked to keep settings (the default).</p>
+      <dl>
+        <dt>Keep settings — install or repair</dt>
+        <dd>Preserves saved Wi-Fi settings on existing FilaScan installations with the current partition layout. Firmware and boot selection are replaced. Settings from other firmware or older partition layouts cannot be guaranteed; use a fresh installation for those devices.</dd>
+        <dt>Fresh installation — check “Erase device”</dt>
+        <dd>Erases the internal flash, including saved Wi-Fi settings, before installing. You will be asked to confirm.</dd>
+      </dl>
+      <p class="notice"><strong>Both options leave the SD card untouched.</strong> FilaMan authentication tokens, settings, caches and pending offline operations on that card remain stored. Erasing the device does not unregister it from FilaMan.</p>
+    </section>
+    <section>
+      <h2>After installation</h2>
+      <p>The device restarts. If it cannot connect to Wi-Fi, wait 60 seconds for the setup access point and follow the instructions on its display. Future firmware updates can be installed over Wi-Fi from the display or the protected web interface.</p>
+      <details><summary>Device not found or unable to connect?</summary><p>Try a different USB data cable or port. If necessary, put the board in download mode using its BOOT/RESET controls, then reconnect. Check the <a href="https://github.com/MasonVX/FilaScan#readme">hardware and USB instructions</a>. This installer does not require FilaScan to be installed beforehand.</p></details>
+    </section>
+    <footer>Powered by <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>. Firmware and this site are hosted on GitHub.</footer>
+  </main>
+</body>
+</html>

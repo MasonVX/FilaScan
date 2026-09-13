@@ -118,12 +118,10 @@ jobs:
       - name: Build and package release firmware
         run: ./scripts/build-firmware.sh dist
 
-      - name: Prepare OTA Pages artifact
-        shell: bash
+      - name: Prepare installer and OTA Pages artifact
         run: |
-          version="$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)"
-          mkdir -p dist/ota-pages
-          cp "dist/FilaScan-$version-ota.bin" dist/ota.toml dist/ota-pages/
+          python3 -m unittest discover -s scripts -p test_web_installer.py
+          python3 scripts/prepare-web-installer.py dist dist/ota-pages
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -171,7 +169,10 @@ jobs:
             --notes-file ".github/releases/$GITHUB_REF_NAME.md"
 
   pages:
-    name: Publish OTA channel
+    name: Publish installer and OTA channel
+    concurrency:
+      group: filascan-pages
+      cancel-in-progress: false
     if: startsWith(github.ref, 'refs/tags/filascan-v')
     needs: build
     runs-on: ubuntu-24.04

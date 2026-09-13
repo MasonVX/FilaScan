@@ -342,10 +342,34 @@ web and network tasks initialize; the ESP-IDF bootloader can otherwise return to
 the previous application partition after a failed first boot.
 
 The update channel is hosted entirely by GitHub at
-`https://masonvx.github.io/FilaScan/`. It contains only `ota.toml` and the
-matching application image; no separate website or server is required. The
+`https://masonvx.github.io/FilaScan/`. It hosts the USB web installer alongside
+`ota.toml` and the matching application image; no separate server is required. The
 current updater verifies the image size and CRC32 supplied by the HTTPS
 manifest. Keep the merged release image available as a USB recovery path.
+
+### Install from your browser
+
+Open [Install FilaScan](https://masonvx.github.io/FilaScan/) in Chrome or Edge on
+a computer and connect a **WT32-SC01 Plus (ESP32-S3, 16 MB flash)** via a USB
+data cable. No existing FilaScan installation or local build tools are needed.
+The chip family is detected, but the specific display board is not.
+
+Leave **Erase device** unchecked (the default) to preserve Wi-Fi settings on
+FilaScan installations using the current partition layout. The installer writes
+only the bootloader, partition table, OTA selection data and first application
+slot. It resets the boot selection to that slot while leaving the settings
+partitions untouched. Preservation is not guaranteed for other firmware or older
+partition layouts; use **Erase device** for a fresh installation in that case.
+
+Both modes leave the SD card untouched, including FilaMan device tokens and
+queued offline operations. Erasing internal flash does not unregister the device
+from FilaMan. After a fresh installation, Wi-Fi setup becomes available after
+60 seconds without a connection.
+
+The website workflow reuses the latest stable release assets and verifies their
+checksums. Website-only changes do not require a firmware release. Future
+firmware releases publish the installer and OTA channel together. Packaging
+rejects unexpected partition layouts rather than risking stored settings.
 
 ## Building on macOS
 
@@ -422,12 +446,16 @@ repository permissions and does not use repository secrets.
 
 Tags matching `filascan-v*` run the same reproducible build and create a GitHub
 release containing both firmware images, checksums, the OTA manifest and build
-metadata. The same tag deploys the OTA image and manifest to GitHub Pages. Only
+metadata. The same tag deploys the web installer, OTA image and manifest to GitHub Pages. Only
 the release job receives permission to create releases; the Pages job receives
 only `pages: write` and OIDC token permissions. The FilaScan version in
 `core/Cargo.toml` must match the numeric part of the tag. GitHub Pages must use
 **GitHub Actions** as its source in the repository settings before the first OTA
 publication.
+
+[`website.yml`](.github/workflows/website.yml) publishes website-only changes
+using the latest stable release's verified binaries, without rebuilding firmware.
+Both publication workflows share a Pages concurrency group.
 
 ## Repository structure
 
