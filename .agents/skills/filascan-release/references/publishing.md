@@ -10,10 +10,12 @@ The shared packaging script produces:
 - `SHA256SUMS`: checksums for both binaries
 - `build-info.txt`: project, version, commit, target, and flash size
 
-After pushing the annotated tag, locate the tag-triggered `firmware.yml` run and wait for all three jobs:
+After pushing the annotated tag, check once for the tag-triggered `firmware.yml` run. Once it is queued or running, report the workflow link and end the task. Do not use `gh run watch`, repeated polling, or background monitoring.
+
+If the user explicitly requests completion verification, inspect all three jobs:
 
 1. ESP32-S3 build/package
 2. GitHub Release publication
 3. GitHub Pages OTA deployment
 
-Verify that the release contains every expected artifact. Verify the Pages `ota.toml` only after deployment completes; CDN propagation can briefly expose the previous version. Keep the merged binary available for USB recovery if OTA installation fails.
+For that explicit verification, confirm the release contains every expected artifact and inspect Pages `ota.toml` after deployment completes; CDN propagation can briefly expose the previous version. If the workflow is still running, report that status without repeatedly polling. Keep the merged binary available for USB recovery if OTA installation fails.

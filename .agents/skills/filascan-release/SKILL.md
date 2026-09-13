@@ -27,4 +27,4 @@ Read `.github/workflows/firmware.yml`, `CHANGELOG.md`, and the current release-n
 - Tagging and pushing are external mutations. Perform them only when the user asked to publish/release or separately authorized them.
 - Create an annotated `filascan-v<VERSION>` tag on the validated commit and push only that tag. Never move, delete, or recreate an existing release tag without explicit user direction.
 - Do not call `gh release create` manually. The tag-triggered workflow builds artifacts, creates the GitHub Release, and deploys the OTA channel.
-- Wait for the tag workflow, then verify its build, release, and Pages jobs as well as the published release assets and `ota.toml` version.
+- After pushing the tag, check once that the tag-triggered GitHub workflow has started or is queued. Report its link and finish; do not watch or repeatedly poll for completion. Do not set up background monitoring. Only check completion, release assets, and the live OTA manifest when the user explicitly requests that verification.
