@@ -64,6 +64,13 @@ language field from the downloaded BambuStudio catalog, with English as the
 fallback when a translation is missing. Bambu product and material names such
 as `PLA Matte` remain unchanged. Technical diagnostic logs remain in English.
 
+Swipe upward from the bottom edge of the device display to open the firmware
+page. It shows the installed version and immediately checks the GitHub-hosted
+OTA channel for a newer release. The page reports whether the firmware is
+current, an update is available or the check failed. Swipe down from the top
+edge or press **Back** to return to the spool reader. Firmware installation
+remains a confirmed action in the protected web interface.
+
 The web interface includes a live diagnostic log for RFID detection, retries,
 read failures and successful spool mappings. Every successful scan prints the
 relevant decoded fields. Bambu scans also include a hexadecimal dump of every

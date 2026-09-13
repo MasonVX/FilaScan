@@ -81,6 +81,7 @@ pub fn init_app(
     let initial_state = initial_window.global::<ReaderState>();
     initial_state.set_german(initial_language == Language::German);
     initial_state.set_status_text(localization::text(initial_language, "Starting RFID reader…", "RFID-Leser wird gestartet…").into());
+    initial_state.set_current_version(env!("CARGO_PKG_VERSION").into());
 
     {
         let weak = Rc::downgrade(&controller);
@@ -111,6 +112,14 @@ pub fn init_app(
         ui.unwrap().global::<ReaderState>().on_archive_spool(move || {
             if let Some(controller) = weak.upgrade() {
                 controller.borrow_mut().archive_spool();
+            }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&controller);
+        ui.unwrap().global::<ReaderState>().on_update_page_opened(move || {
+            if let Some(controller) = weak.upgrade() {
+                controller.borrow_mut().check_for_firmware_update();
             }
         });
     }
@@ -145,6 +154,19 @@ impl ReaderController {
     fn log_error(&self, message: &str) {
         error!("{}", message);
         self.diagnostics.borrow_mut().error(message);
+    }
+
+    fn check_for_firmware_update(&mut self) {
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
+        state.set_update_checking(true);
+        state.set_update_available(false);
+        state.set_update_error(false);
+        state.set_update_installing(false);
+        state.set_available_version("".into());
+        state.set_update_error_text("".into());
+        self.log_info("Checking for a firmware update from the device display");
+        self.framework.borrow().check_firmware_ota();
     }
 
     fn close_location_selection(&self) {
@@ -1008,6 +1030,12 @@ impl FrameworkObserver for ReaderController {
 
     fn on_initialization_completed(&self, _status: bool) {}
     fn on_ota_version_available(&mut self, version: &str, newer: bool) {
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
+        state.set_update_checking(false);
+        state.set_update_available(newer);
+        state.set_update_error(false);
+        state.set_available_version(version.into());
         if newer {
             self.log_info(&format!("Firmware update available: {version}"));
         } else {
@@ -1016,6 +1044,11 @@ impl FrameworkObserver for ReaderController {
     }
 
     fn on_ota_start(&mut self) {
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
+        state.set_update_checking(false);
+        state.set_update_error(false);
+        state.set_update_installing(true);
         self.log_info("Firmware update started");
         self.show_status(self.t("Installing firmware update…", "Firmware-Update wird installiert…"));
     }
@@ -1025,11 +1058,21 @@ impl FrameworkObserver for ReaderController {
     }
 
     fn on_ota_failed(&mut self, text: &str) {
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
+        state.set_update_checking(false);
+        state.set_update_error(true);
+        state.set_update_installing(false);
+        state.set_update_error_text(text.into());
         self.log_error(&format!("Firmware update failed: {}", text.replace('\n', " ")));
         self.show_status(self.t("Firmware update failed", "Firmware-Update fehlgeschlagen"));
     }
 
     fn on_ota_completed(&mut self, text: &str) {
+        let window = self.ui.unwrap();
+        let state = window.global::<ReaderState>();
+        state.set_update_checking(false);
+        state.set_update_error(false);
         self.log_info(&format!("Firmware update completed: {}", text.replace('\n', " ")));
         self.show_status(self.t("Firmware updated. Restarting…", "Firmware aktualisiert. Neustart…"));
     }

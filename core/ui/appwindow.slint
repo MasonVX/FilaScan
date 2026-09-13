@@ -350,11 +350,117 @@ component LocationSelectionView inherits Rectangle {
     }
 }
 
+component UpdateView inherits Rectangle {
+    background: #10151d;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+
+        Text {
+            height: 38px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: #72d6ff;
+            font-size: 28px;
+            font-weight: 700;
+            text: ReaderState.german ? "Firmware-Update" : "Firmware update";
+        }
+
+        Text {
+            height: 26px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: #a9b8c7;
+            font-size: 16px;
+            text: (ReaderState.german ? "Installierte Version: " : "Installed version: ") + ReaderState.current-version;
+        }
+
+        Rectangle {
+            height: 98px;
+            background: ReaderState.update-error ? #3a2026 : ReaderState.update-available ? #173629 : #1d2733;
+            border-width: 1px;
+            border-color: ReaderState.update-error ? #d16a76 : ReaderState.update-available ? #5ee08a : #344250;
+            border-radius: 10px;
+
+            Text {
+                x: 12px;
+                y: 8px;
+                width: parent.width - 24px;
+                height: parent.height - 16px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                color: white;
+                font-size: 19px;
+                text: ReaderState.update-installing
+                    ? (ReaderState.german ? "Firmware-Update wird installiert…" : "Installing firmware update…")
+                    : ReaderState.update-checking
+                        ? (ReaderState.german ? "Neue Version wird gesucht…" : "Checking for a new version…")
+                        : ReaderState.update-error
+                            ? (ReaderState.german ? "Prüfung fehlgeschlagen\n" : "Update check failed\n") + ReaderState.update-error-text
+                            : ReaderState.update-available
+                                ? (ReaderState.german ? "Neue Version verfügbar: " : "New version available: ") + ReaderState.available-version
+                                : (ReaderState.german ? "Die Firmware ist aktuell." : "The firmware is up to date.");
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            ActionButton {
+                label: ReaderState.update-checking
+                    ? (ReaderState.german ? "Prüfe…" : "Checking…")
+                    : (ReaderState.german ? "Erneut prüfen" : "Check again");
+                enabled: !ReaderState.update-checking && !ReaderState.update-installing;
+                clicked => { ReaderState.update-page-opened(); }
+            }
+
+            ActionButton {
+                label: ReaderState.german ? "Zurück" : "Back";
+                enabled: !ReaderState.update-installing;
+                normal-color: #54343a;
+                clicked => { ReaderState.update-page-visible = false; }
+            }
+        }
+
+        Text {
+            height: 22px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: #8797a8;
+            font-size: 13px;
+            text: ReaderState.german ? "Vom oberen Rand nach unten wischen" : "Swipe down from the top edge";
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     width: 480px;
     height: 320px;
 
-    if ReaderState.choosing-location: LocationSelectionView { }
-    if ReaderState.has-spool && !ReaderState.choosing-location: SpoolView { }
-    if !ReaderState.has-spool && !ReaderState.choosing-location: IdleView { }
+    gestures := SwipeGestureHandler {
+        width: parent.width;
+        height: parent.height;
+        handle-swipe-up: !ReaderState.update-page-visible && !ReaderState.choosing-location && !ReaderState.update-installing;
+        handle-swipe-down: ReaderState.update-page-visible && !ReaderState.update-installing;
+
+        swiped => {
+            if self.handle-swipe-up
+                    && self.pressed-position.y > self.height - 72px
+                    && self.current-position.y < self.pressed-position.y - self.height / 8 {
+                ReaderState.update-page-visible = true;
+                ReaderState.update-page-opened();
+            } else if self.handle-swipe-down
+                    && self.pressed-position.y < 72px
+                    && self.current-position.y > self.pressed-position.y + self.height / 8 {
+                ReaderState.update-page-visible = false;
+            }
+        }
+
+        if ReaderState.update-page-visible: UpdateView { }
+        if ReaderState.choosing-location && !ReaderState.update-page-visible: LocationSelectionView { }
+        if ReaderState.has-spool && !ReaderState.choosing-location && !ReaderState.update-page-visible: SpoolView { }
+        if !ReaderState.has-spool && !ReaderState.choosing-location && !ReaderState.update-page-visible: IdleView { }
+    }
 }

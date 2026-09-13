@@ -46,4 +46,14 @@ export global ReaderState {
     in-out property <string> wifi-url: "";
     in-out property <string> wifi-ssid: "";
     in-out property <string> wifi-key: "";
+
+    in-out property <bool> update-page-visible: false;
+    in-out property <string> current-version: "?.?.?";
+    in-out property <bool> update-checking: false;
+    in-out property <bool> update-available: false;
+    in-out property <bool> update-error: false;
+    in-out property <bool> update-installing: false;
+    in-out property <string> available-version: "";
+    in-out property <string> update-error-text: "";
+    callback update-page-opened();
 }

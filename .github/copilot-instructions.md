@@ -4,10 +4,10 @@ FilaScan is ESP32-S3 firmware for a standalone Bambu Lab filament RFID reader.
 The device reads factory tags and immediately displays the mapped Bambu product,
 color and physical spool parameters.
 
-FilaScan does not contain a filament inventory, printer or AMS integration,
-MQTT client, spool scale, tag writer, print monitor or external integration API.
-The web interface is limited to Wi-Fi provisioning and read-only live
-diagnostics.
+FilaScan does not contain a local filament inventory, printer or AMS
+integration, MQTT client, spool scale, tag writer or print monitor. The web
+interface provides Wi-Fi, catalog, FilaMan and OTA configuration plus read-only
+live diagnostics.
 
 ## Origin
 
@@ -43,8 +43,8 @@ The ELF is written to
 | `core/src/bambu_spool.rs` | Raw tag parsing and official-name mapping |
 | `core/src/diagnostics.rs` | Bounded in-memory reader log |
 | `core/src/app.rs` | Reader events and Slint state updates |
-| `core/ui/` | On-device spool overview |
-| `core/static/` | Wi-Fi-only web configuration |
+| `core/ui/` | On-device spool overview, actions and firmware status |
+| `core/static/` | Protected Wi-Fi, catalog, FilaMan and OTA configuration |
 | `shared/src/bambu_reader.rs` | Reader selection and hardware-neutral events |
 | `shared/src/pn532_reader.rs` | PN532 scan and recovery loop |
 | `shared/src/pn532_ext.rs` | PN532 MIFARE block adapter |

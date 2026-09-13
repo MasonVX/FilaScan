@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added an on-device firmware page opened by swiping upward from the bottom
+  edge. It shows the installed version and checks the GitHub OTA channel whenever
+  the page is opened; installation remains in the protected web interface.
+- Added user-initiated A/B OTA updates, GitHub Pages publication, boot
+  confirmation and rollback support.
+
 - Reduced PN5180 tag-removal confirmation to 750 ms and transient RF recovery
   to two seconds. Payload reads now stop after two consecutive attempts without
   additional blocks while retaining the five-attempt maximum.
