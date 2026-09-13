@@ -15,7 +15,7 @@ use core::{
 use edge_http::{Method, io::client::Connection};
 use edge_nal_embassy::{Tcp, TcpBuffers};
 use embassy_net::IpAddress;
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::{Read, Write};
 use esp_mbedtls::{Certificates, TlsVersion, X509};
 use framework::{framework::Framework, utils::SpawnerHeapExt};
@@ -37,7 +37,8 @@ const SETTINGS_PATH: &str = "/filascan/filaman/settings.jsn";
 const INVENTORY_PATH: &str = "/filascan/filaman/invent.jsn";
 const QUEUE_PATH: &str = "/filascan/filaman/queue.jsn";
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
-const HEARTBEAT_INITIAL_DELAY: Duration = Duration::from_secs(15);
+const CONNECTION_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const CONNECTION_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(20);
 const INVENTORY_REFRESH_HEARTBEATS: u16 = 15;
@@ -232,25 +233,51 @@ impl FilaManService {
         let spawner = self.framework.borrow().spawner;
         spawner
             .spawn_heap(async move {
-                Timer::after(HEARTBEAT_INITIAL_DELAY).await;
+                let mut previous_ip = None;
+                let mut next_heartbeat = Instant::now();
+                let mut next_sync = Instant::now();
                 loop {
-                    service.send_heartbeat_if_ready().await;
-                    Timer::after(HEARTBEAT_INTERVAL).await;
+                    let ip = service.local_ipv4_address();
+                    if ip != previous_ip {
+                        previous_ip = ip.clone();
+                        service.heartbeat_succeeded.set(false);
+                        service.heartbeat_failure_active.set(false);
+                        next_heartbeat = Instant::now();
+                    }
+                    if ip.is_some() && Instant::now() >= next_heartbeat {
+                        if service.send_heartbeat_if_ready().await {
+                            next_heartbeat = Instant::now() + if service.heartbeat_failure_active.get() {
+                                CONNECTION_RETRY_INTERVAL
+                            } else {
+                                HEARTBEAT_INTERVAL
+                            };
+                            next_sync = Instant::now() + CONNECTION_RETRY_INTERVAL;
+                        }
+                    }
+                    if !service.use_offline_inventory()
+                        && !service.busy.get()
+                        && Instant::now() >= next_sync
+                        && service.offline.status().pending_operations > 0
+                    {
+                        service.run_online_maintenance(false).await;
+                        next_sync = Instant::now() + CONNECTION_RETRY_INTERVAL;
+                    }
+                    Timer::after(CONNECTION_POLL_INTERVAL).await;
                 }
             })
             .map_err(|_| "Could not start FilaMan heartbeat task".to_string())
     }
 
-    async fn send_heartbeat_if_ready(&self) {
+    async fn send_heartbeat_if_ready(&self) -> bool {
         let settings = self.settings.borrow().clone();
         if settings.base_url.is_empty() || device_id_from_token(&settings.device_token).is_none() {
-            return;
+            return false;
         }
         let Some(ip_address) = self.local_ipv4_address() else {
-            return;
+            return false;
         };
         if self.busy.replace(true) {
-            return;
+            return false;
         }
 
         let result = with_timeout(
@@ -270,7 +297,7 @@ impl FilaManService {
                     self.log_info(&format!("FilaMan heartbeat recovered; reporting local IP {ip_address}"));
                 }
                 self.run_online_maintenance(first_success || recovered).await;
-                return;
+                return true;
             }
             Ok(Ok(_)) => "FilaMan returned an invalid heartbeat response".to_string(),
             Ok(Err(error)) => error,
@@ -279,6 +306,20 @@ impl FilaManService {
 
         if !self.heartbeat_failure_active.replace(true) {
             self.log_warn(&format!("FilaMan heartbeat failed: {error}"));
+        }
+        true
+    }
+
+    async fn await_initial_connection(&self) {
+        if self.local_ipv4_address().is_none() || self.heartbeat_succeeded.get() || self.heartbeat_failure_active.get() {
+            return;
+        }
+        self.log_info("Waiting for the initial FilaMan connection check");
+        let deadline = Instant::now() + HEARTBEAT_TIMEOUT + Duration::from_secs(1);
+        while !self.heartbeat_succeeded.get() && !self.heartbeat_failure_active.get()
+            && self.local_ipv4_address().is_some() && Instant::now() < deadline
+        {
+            Timer::after(CONNECTION_POLL_INTERVAL).await;
         }
     }
 
@@ -594,6 +635,7 @@ impl FilaManService {
         if let Err(error) = validate_spool(spool) {
             return Err(error.to_string());
         }
+        self.await_initial_connection().await;
         if self.use_offline_inventory() {
             self.log_info(&format!(
                 "FilaMan is offline; resolving external ID {} from the cached inventory",
@@ -662,15 +704,18 @@ impl FilaManService {
             return Err("FilaMan location is invalid".to_string());
         }
 
+        self.await_initial_connection().await;
+        if self.busy.replace(true) {
+            return Err("Another FilaMan request is already running".to_string());
+        }
         if self.use_offline_inventory() {
-            self.enqueue_storage(spool, location_id, location_name).await?;
+            let result = self.enqueue_storage(spool, location_id, location_name).await;
+            self.busy.set(false);
+            result?;
             return Ok(StorageOutcome::Queued {
                 location_id,
                 location_name: location_name.to_string(),
             });
-        }
-        if self.busy.replace(true) {
-            return Err("Another FilaMan request is already running".to_string());
         }
         let result = match known_spool_id {
             Some(spool_id) => self.move_spool_inner(spool_id, location_id).await.map(|response| response.spool_id),
@@ -685,8 +730,7 @@ impl FilaManService {
             Err(error) if is_transport_error(&error) => {
                 self.heartbeat_failure_active.set(true);
                 self.log_warn(&format!("FilaMan became unavailable; preserving the requested location offline: {error}"));
-                self.enqueue_storage(spool, location_id, location_name).await?;
-                Ok(StorageOutcome::Queued {
+                self.enqueue_storage(spool, location_id, location_name).await.map(|()| StorageOutcome::Queued {
                     location_id,
                     location_name: location_name.to_string(),
                 })
