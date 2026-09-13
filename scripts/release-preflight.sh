@@ -2,6 +2,12 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+if command -v brew >/dev/null 2>&1; then
+  rustup_bin="$(brew --prefix rustup)/bin"
+  export PATH="$rustup_bin:$HOME/.cargo/bin:$PATH"
+else
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo_dir/core/Cargo.toml" | head -1)"
 expected_version="${1:-$version}"
 tag="filascan-v$expected_version"
