@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "FilaScan"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "edge-captive",
  "edge-dhcp",
@@ -23,6 +23,7 @@ dependencies = [
  "esp-hal",
  "esp-hal-app-framework",
  "esp-hal-app-framework-macros",
+ "esp-hal-ota",
  "esp-mbedtls",
  "esp-println",
  "esp-radio",

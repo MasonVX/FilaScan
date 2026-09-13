@@ -66,6 +66,7 @@ The ELF is written to
   interface. Shared Bambu tag knowledge belongs in `shared/src/nfc.rs`.
 - Keep material and color mapping local and retain raw values as the fallback
   for unknown Bambu entries.
-- Do not add inventory, printer, MQTT, scale or OTA controls to the Wi-Fi and
-  diagnostics page.
+- Do not add inventory, printer, MQTT or scale controls to the configuration
+  page. Keep OTA controls limited to an explicit version check and a confirmed,
+  user-initiated installation through the existing framework updater.
 - Add an external integration API as a separate, deliberately reviewed change.

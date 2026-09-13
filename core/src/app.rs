@@ -1007,11 +1007,32 @@ impl FrameworkObserver for ReaderController {
     }
 
     fn on_initialization_completed(&self, _status: bool) {}
-    fn on_ota_version_available(&mut self, _version: &str, _newer: bool) {}
-    fn on_ota_start(&mut self) {}
-    fn on_ota_status(&mut self, _text: &str) {}
-    fn on_ota_failed(&mut self, _text: &str) {}
-    fn on_ota_completed(&mut self, _text: &str) {}
+    fn on_ota_version_available(&mut self, version: &str, newer: bool) {
+        if newer {
+            self.log_info(&format!("Firmware update available: {version}"));
+        } else {
+            self.log_info(&format!("Firmware is up to date: {version}"));
+        }
+    }
+
+    fn on_ota_start(&mut self) {
+        self.log_info("Firmware update started");
+        self.show_status(self.t("Installing firmware update…", "Firmware-Update wird installiert…"));
+    }
+
+    fn on_ota_status(&mut self, text: &str) {
+        self.log_info(&format!("Firmware update: {}", text.replace('\n', " ")));
+    }
+
+    fn on_ota_failed(&mut self, text: &str) {
+        self.log_error(&format!("Firmware update failed: {}", text.replace('\n', " ")));
+        self.show_status(self.t("Firmware update failed", "Firmware-Update fehlgeschlagen"));
+    }
+
+    fn on_ota_completed(&mut self, text: &str) {
+        self.log_info(&format!("Firmware update completed: {}", text.replace('\n', " ")));
+        self.show_status(self.t("Firmware updated. Restarting…", "Firmware aktualisiert. Neustart…"));
+    }
 
     fn on_web_config_started(&self, key: &str, _mode: WebConfigMode) {
         let ui = self.ui.unwrap();

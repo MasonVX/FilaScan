@@ -130,11 +130,27 @@ jobs:
             target/xtensa-esp32s3-none-elf/release/FilaScan \
             ../dist/FilaScan-esp32s3.bin
 
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          ota_file="../dist/FilaScan-$version-ota.bin"
+          espflash save-image \
+            --chip esp32s3 \
+            --flash-size 16mb \
+            --flash-mode dio \
+            --flash-freq 80mhz \
+            --partition-table partitions.csv \
+            target/xtensa-esp32s3-none-elf/release/FilaScan \
+            "$ota_file"
+
           (
             cd ../dist
-            sha256sum FilaScan-esp32s3.bin > FilaScan-esp32s3.bin.sha256
+            sha256sum FilaScan-esp32s3.bin "FilaScan-$version-ota.bin" > SHA256SUMS
           )
-          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          ota_size="$(stat -c '%s' "$ota_file")"
+          ota_crc32="$(python3 -c 'import pathlib, sys, zlib; print(f"{zlib.crc32(pathlib.Path(sys.argv[1]).read_bytes()) & 0xffffffff:08x}")' "$ota_file")"
+          printf 'filename = "FilaScan-%s-ota.bin"\nversion = "%s"\nfilesize = %s\ncrc32 = "%s"\n' \
+            "$version" "$version" "$ota_size" "$ota_crc32" > ../dist/ota.toml
+          mkdir -p ../dist/ota-pages
+          cp "$ota_file" ../dist/ota.toml ../dist/ota-pages/
           printf 'project=FilaScan\nfirmware_version=%s\ngit_commit=%s\ntarget=esp32s3\nflash_size=16mb\n' \
             "$version" "$GITHUB_SHA" > ../dist/build-info.txt
 
@@ -172,8 +188,45 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#filascan-v}"
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$GITHUB_REF_NAME" \
+            dist/FilaScan-esp32s3.bin \
+            "dist/FilaScan-$version-ota.bin" \
+            dist/SHA256SUMS \
+            dist/build-info.txt \
+            dist/ota.toml \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "FilaScan $version" \
             --notes-file ".github/releases/$GITHUB_REF_NAME.md"
+
+  pages:
+    name: Publish OTA channel
+    if: startsWith(github.ref, 'refs/tags/filascan-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: FilaScan-esp32s3-${{ github.sha }}
+          path: dist
+
+      - name: Upload OTA channel
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: dist/ota-pages
+
+      - name: Deploy OTA channel
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

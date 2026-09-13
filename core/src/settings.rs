@@ -20,9 +20,9 @@ pub fn rfid_reader_mode() -> shared::reader::ReaderMode {
     }
 }
 
-// OTA is intentionally not exposed by FilaScan. These values only satisfy the
-// generic hardware framework configuration until a FilaScan update path exists.
-pub const OTA_DOMAIN: &str = "";
-pub const OTA_PATH: &str = "";
-pub const OTA_TOML_FILENAME: &str = "";
-pub const OTA_TLS_CERTIFICATE: &str = "\0";
+// Release firmware is published as direct HTTPS assets by GitHub Pages. The
+// trailing NUL is required by the embedded X.509 parser.
+pub const OTA_DOMAIN: &str = "masonvx.github.io";
+pub const OTA_PATH: &str = "/FilaScan/";
+pub const OTA_TOML_FILENAME: &str = "ota.toml";
+pub const OTA_TLS_CERTIFICATE: &str = concat!(include_str!("certs/isrg-root-x1.pem"), "\0");

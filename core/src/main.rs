@@ -41,6 +41,7 @@ use esp_hal::{
     timer::timg::TimerGroup,
 };
 use esp_mbedtls::Tls;
+use esp_hal_ota::{Ota, OtaImgState};
 use esp_storage::FlashStorage;
 use framework::{
     RNG,
@@ -63,6 +64,20 @@ fn init_psram_heap(start: *mut u8, size: usize) {
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(start, size, esp_alloc::MemoryCapability::External.into()));
     }
+}
+
+fn confirm_running_ota_image() -> Result<bool, alloc::string::String> {
+    let mut ota = Ota::new(FlashStorage::new()).map_err(|error| alloc::format!("OTA state initialization failed: {error:?}"))?;
+    let state = match ota.get_ota_image_state() {
+        Ok(state) => state,
+        Err(_) => return Ok(false),
+    };
+    if matches!(state, OtaImgState::EspOtaImgNew | OtaImgState::EspOtaImgPendingVerify) {
+        ota.ota_mark_app_valid()
+            .map_err(|error| alloc::format!("Could not confirm the running OTA image: {error:?}"))?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 #[esp_rtos::main]
@@ -308,6 +323,11 @@ async fn main(spawner: Spawner) {
     spawner.spawn(framework::wifi::ap_net_task(ap_runner)).ok();
 
     framework.borrow().notify_initialization_completed(true);
+    match confirm_running_ota_image() {
+        Ok(true) => diagnostics.borrow_mut().info("Running OTA firmware confirmed as healthy"),
+        Ok(false) => {}
+        Err(error) => diagnostics.borrow_mut().warn(&error),
+    }
     Framework::wait_for_wifi(&framework).await;
     framework.borrow_mut().start_web_app(sta_stack, framework::framework::WebConfigMode::STA);
     if let Err(error) = catalog_service.start_periodic_updates() {

@@ -260,9 +260,9 @@ explicit PN5180 mode does not fall back to PN532 when detection fails.
 ## Web interface
 
 The web interface provides language selection, Wi-Fi configuration, Bambu
-catalog update settings, FilaMan integration settings and a read-only live
-diagnostic log. It contains no local inventory, printer, MQTT, scale, OTA or
-filament-management settings.
+catalog update settings, FilaMan integration settings, firmware updates and a
+read-only live diagnostic log. It contains no local inventory, printer, MQTT,
+scale or filament-management settings.
 
 When no Wi-Fi credentials are stored, FilaScan creates an access point named
 `FilaScan`. Connect to it and open:
@@ -292,6 +292,29 @@ integration settings cannot be saved without an SD card.
 The diagnostic log records the ESP32 reset reason at startup. This provides a
 passive indication of power, software and watchdog resets after a restart; it
 does not require a persistent USB or browser diagnostic connection.
+
+### Firmware updates
+
+FilaScan supports user-initiated over-the-air updates through the protected web
+interface. **Check for updates** reads the release manifest; **Install update**
+is enabled only when the published semantic version is newer than the running
+firmware. Installation requires confirmation. Progress and failures are shown
+on the configuration page and written to the live diagnostic log. The device
+restarts after a successful installation.
+
+OTA downloads use validated HTTPS and are written to the inactive application
+partition. Wi-Fi is required, but an SD card is not. Settings in flash and files
+on the SD card are not replaced. The first OTA-capable firmware must be flashed
+over USB. Partition-table or bootloader changes still require the merged USB
+image. A newly installed image is confirmed only after the core display, reader,
+web and network tasks initialize; the ESP-IDF bootloader can otherwise return to
+the previous application partition after a failed first boot.
+
+The update channel is hosted entirely by GitHub at
+`https://masonvx.github.io/FilaScan/`. It contains only `ota.toml` and the
+matching application image; no separate website or server is required. The
+current updater verifies the image size and CRC32 supplied by the HTTPS
+manifest. Keep the merged release image available as a USB recovery path.
 
 ## Building on macOS
 
@@ -332,14 +355,18 @@ If no port is provided, the flash script uses `/dev/cu.usbmodem31101`.
 The workflow in
 [`firmware.yml`](.github/workflows/firmware.yml) builds the ESP32-S3 release
 firmware on pushes to `main`, pull requests and manual runs. It uploads the
-merged binary, its SHA-256 checksum and build metadata as a GitHub Actions
-artifact. The workflow has read-only repository permissions and does not use
-repository secrets.
+merged USB binary, an OTA application image, SHA-256 checksums, the OTA manifest
+and build metadata as a GitHub Actions artifact. The build job has read-only
+repository permissions and does not use repository secrets.
 
 Tags matching `filascan-v*` run the same reproducible build and create a GitHub
-release containing the merged firmware image, SHA-256 checksum and build
-metadata. Only the release job receives permission to create the release. The
-FilaScan version in `core/Cargo.toml` must match the numeric part of the tag.
+release containing both firmware images, checksums, the OTA manifest and build
+metadata. The same tag deploys the OTA image and manifest to GitHub Pages. Only
+the release job receives permission to create releases; the Pages job receives
+only `pages: write` and OIDC token permissions. The FilaScan version in
+`core/Cargo.toml` must match the numeric part of the tag. GitHub Pages must use
+**GitHub Actions** as its source in the repository settings before the first OTA
+publication.
 
 ## Repository structure
 
@@ -354,7 +381,7 @@ FilaScan version in `core/Cargo.toml` must match the numeric part of the tag.
 | `core/src/localization.rs` | Display and web language selection with SD persistence |
 | `core/src/diagnostics.rs` | Bounded in-memory diagnostic log |
 | `core/ui/` | Slint display UI |
-| `core/static/` | Protected Wi-Fi, catalog and FilaMan configuration |
+| `core/static/` | Protected Wi-Fi, catalog, FilaMan and OTA configuration |
 | `shared/src/reader.rs` | Reader selection and hardware-neutral event interface |
 | `shared/src/pn532_reader.rs` | PN532 detection, ISO-A selection and read recovery |
 | `shared/src/pn5180.rs` | PN5180 SPI, BUSY, ISO-A/MIFARE Classic and NFC-V driver |

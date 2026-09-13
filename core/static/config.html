@@ -107,6 +107,17 @@
         </div>
         <p id="filaman-status" class="status">FilaMan status unavailable.</p>
       </section>
+
+      <section id="ota" hidden>
+        <h2 data-i18n="firmwareUpdate">Firmware update</h2>
+        <p class="section-description" data-i18n="firmwareDescription">Check for and install FilaScan releases published through GitHub.</p>
+        <p id="ota-version" class="field-help"></p>
+        <div class="button-row">
+          <button id="ota-check" type="button" data-i18n="checkUpdates">Check for updates</button>
+          <button id="ota-install" class="secondary" type="button" data-i18n="installUpdate" disabled>Install update</button>
+        </div>
+        <p id="ota-status" class="status">No update check has been run.</p>
+      </section>
     </main>
 
     <script type="module">
@@ -128,6 +139,8 @@
           deviceCode: 'Device registration code', deviceCodeHelp: 'Create a device in FilaMan, enter its 6-character one-time code here, then authorize the registered device on the FilaScan import plugin page.', registerDevice: 'Register device',
           registered: 'Registered', logoutDevice: 'Log out', logoutHelp: 'Logging out removes the stored token from FilaScan. Delete or revoke the device separately in FilaMan.', deviceLabel: 'Device',
           enableFilaman: 'Enable FilaMan location selection after scanning', saveFilaman: 'Save FilaMan settings', testConnection: 'Test connection',
+          firmwareUpdate: 'Firmware update', firmwareDescription: 'Check for and install FilaScan releases published through GitHub.',
+          checkUpdates: 'Check for updates', installUpdate: 'Install update', updateNotChecked: 'No update check has been run.', currentVersion: 'Current version',
         },
         de: {
           subtitle: 'WLAN, Bambu-Katalog, FilaMan und Live-Diagnose', deviceLog: 'Geräteprotokoll', setupKey: 'Einrichtungsschlüssel', unlock: 'Entsperren',
@@ -142,6 +155,8 @@
           deviceCode: 'Geräte-Registrierungscode', deviceCodeHelp: 'Lege in FilaMan ein Gerät an, trage hier dessen sechsstelligen Einmalcode ein und autorisiere das registrierte Gerät anschließend auf der Seite des FilaScan-Import-Plugins.', registerDevice: 'Gerät registrieren',
           registered: 'Registriert', logoutDevice: 'Abmelden', logoutHelp: 'Beim Abmelden wird der gespeicherte Token aus FilaScan entfernt. Lösche oder widerrufe das Gerät separat in FilaMan.', deviceLabel: 'Gerät',
           enableFilaman: 'FilaMan-Standortauswahl nach dem Scannen aktivieren', saveFilaman: 'FilaMan-Einstellungen speichern', testConnection: 'Verbindung testen',
+          firmwareUpdate: 'Firmware-Update', firmwareDescription: 'Prüfe und installiere FilaScan-Veröffentlichungen, die über GitHub bereitgestellt werden.',
+          checkUpdates: 'Nach Updates suchen', installUpdate: 'Update installieren', updateNotChecked: 'Es wurde noch nicht nach Updates gesucht.', currentVersion: 'Aktuelle Version',
         },
       };
       let currentLanguage = 'en';
@@ -161,6 +176,7 @@
       const languageSection = document.querySelector('#language');
       const catalogSection = document.querySelector('#catalog');
       const filamanSection = document.querySelector('#filaman');
+      const otaSection = document.querySelector('#ota');
       const ssidInput = document.querySelector('#ssid');
       const passwordInput = document.querySelector('#password');
       const saveStatus = document.querySelector('#save-status');
@@ -182,6 +198,10 @@
       const filamanEnabledInput = document.querySelector('#filaman-enabled');
       const filamanStatus = document.querySelector('#filaman-status');
       const filamanTestButton = document.querySelector('#filaman-test');
+      const otaVersion = document.querySelector('#ota-version');
+      const otaStatus = document.querySelector('#ota-status');
+      const otaCheckButton = document.querySelector('#ota-check');
+      const otaInstallButton = document.querySelector('#ota-install');
       let encryptionKey;
       let lastLogText = '';
       let filamanRegistrationPending = false;
@@ -270,6 +290,46 @@
         return JSON.parse(decrypt(encryptionKey, await response.text()));
       }
 
+      async function readOta() {
+        const response = await fetch('/api/ota-config', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        return JSON.parse(decrypt(encryptionKey, await response.text()));
+      }
+
+      function renderOtaStatus(config) {
+        const status = config.status || '';
+        const busy = status === 'Update started' || status.startsWith('In progress:') || status.startsWith('Update completed:');
+        const updateAvailable = status.startsWith('Version ') && status.endsWith(' (new)');
+        otaVersion.textContent = `${translations[currentLanguage].currentVersion}: ${config.curr_ver}`;
+        if (status.startsWith('Version ') && status.endsWith(' (new)')) {
+          otaStatus.textContent = `${tr('Update available', 'Update verfügbar')}: ${status.slice(8, -16)}`;
+        } else if (status.startsWith('Version ')) {
+          otaStatus.textContent = tr('The firmware is up to date.', 'Die Firmware ist aktuell.');
+        } else if (status === 'Update started') {
+          otaStatus.textContent = tr('Firmware update started…', 'Firmware-Update gestartet…');
+        } else if (status.startsWith('Update failed:')) {
+          otaStatus.textContent = `${tr('Firmware update failed', 'Firmware-Update fehlgeschlagen')}: ${status.slice(15).trim()}`;
+        } else if (status.startsWith('Update completed:')) {
+          otaStatus.textContent = tr('Firmware installed. FilaScan is restarting…', 'Firmware installiert. FilaScan wird neu gestartet…');
+        } else {
+          otaStatus.textContent = status || translations[currentLanguage].updateNotChecked;
+        }
+        otaCheckButton.disabled = busy;
+        otaInstallButton.disabled = busy || !updateAvailable;
+      }
+
+      async function refreshOtaStatus() {
+        if (!encryptionKey || otaSection.hidden) return;
+        if (!beginBackgroundRequest()) return;
+        try {
+          renderOtaStatus(await readOta());
+        } catch (error) {
+          otaStatus.textContent = `${tr('Could not read update status', 'Update-Status konnte nicht gelesen werden')}: ${error.message}`;
+        } finally {
+          endBackgroundRequest();
+        }
+      }
+
       function renderFilaManStatus(config) {
         filamanStatus.textContent = `${config.busy ? tr('Working', 'In Arbeit') : config.state} · ${config.enabled ? tr('location selection enabled', 'Standortauswahl aktiviert') : tr('location selection disabled', 'Standortauswahl deaktiviert')}`;
         filamanRegistrationForm.hidden = config.registered === true;
@@ -322,6 +382,7 @@
         wifiSection.hidden = true;
         catalogSection.hidden = true;
         filamanSection.hidden = true;
+        otaSection.hidden = true;
         await beginForegroundRequest();
         try {
           encryptionKey = derive_key(keyInput.value.trim(), 'example_salt');
@@ -330,6 +391,7 @@
           const language = await readLanguage();
           const catalog = await readCatalog();
           const filaman = await readFilaMan();
+          const ota = await readOta();
           ssidInput.value = wifi.ssid || '';
           passwordInput.value = wifi.password || '';
           languageInput.value = language.language || 'en';
@@ -341,11 +403,13 @@
           filamanCaInput.value = filaman.ca_certificate_pem || '';
           filamanEnabledInput.checked = filaman.enabled === true;
           renderFilaManStatus(filaman);
+          renderOtaStatus(ota);
           keyStatus.textContent = tr('Setup key accepted.', 'Einrichtungsschlüssel akzeptiert.');
           languageSection.hidden = false;
           wifiSection.hidden = false;
           catalogSection.hidden = false;
           filamanSection.hidden = false;
+          otaSection.hidden = false;
         } catch (error) {
           keyStatus.textContent = `${tr('Could not unlock setup', 'Einrichtung konnte nicht entsperrt werden')}: ${error.message}`;
         } finally {
@@ -396,6 +460,38 @@
 
       setInterval(refreshCatalogStatus, 2000);
       setInterval(refreshFilaManStatus, 2000);
+      setInterval(refreshOtaStatus, 1000);
+
+      otaCheckButton.addEventListener('click', async () => {
+        otaStatus.textContent = tr('Checking for firmware updates…', 'Firmware-Updates werden gesucht…');
+        otaCheckButton.disabled = true;
+        otaInstallButton.disabled = true;
+        try {
+          const response = await send('/api/ota-request', { request: 'CheckVersion' });
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          setTimeout(refreshOtaStatus, 500);
+        } catch (error) {
+          otaStatus.textContent = `${tr('Could not check for updates', 'Updates konnten nicht gesucht werden')}: ${error.message}`;
+          otaCheckButton.disabled = false;
+        }
+      });
+
+      otaInstallButton.addEventListener('click', async () => {
+        if (!confirm(tr('Install the firmware update and restart FilaScan?', 'Firmware-Update installieren und FilaScan neu starten?'))) return;
+        otaStatus.textContent = tr('Starting firmware update…', 'Firmware-Update wird gestartet…');
+        otaCheckButton.disabled = true;
+        otaInstallButton.disabled = true;
+        try {
+          const response = await send('/api/ota-request', { request: 'Update' });
+          const result = JSON.parse(decrypt(encryptionKey, await response.text()));
+          if (result.error_text) throw new Error(result.error_text);
+          setTimeout(refreshOtaStatus, 500);
+        } catch (error) {
+          otaStatus.textContent = `${tr('Could not start firmware update', 'Firmware-Update konnte nicht gestartet werden')}: ${error.message}`;
+          otaCheckButton.disabled = false;
+        }
+      });
 
       filamanRegisterButton.addEventListener('click', async () => {
         filamanStatus.textContent = tr('Registering device with FilaMan…', 'Gerät wird bei FilaMan registriert…');
