@@ -29,12 +29,15 @@ Use the repository scripts:
 ```sh
 ./scripts/bootstrap-macos.sh
 ./scripts/build-firmware.sh
-./scripts/flash-device.sh /dev/cu.usbmodem31101
+./scripts/flash-device.sh [/dev/cu.usbmodem...]
+./scripts/monitor-device.sh [/dev/cu.usbmodem...]
 ```
 
 The ELF is written to
 `core/target/xtensa-esp32s3-none-elf/release/FilaScan`. The merged image is
-`build/FilaScan-esp32s3.bin`.
+`build/FilaScan-esp32s3.bin`; the application-only OTA image and its manifest
+are written to the same directory. Flashing rebuilds the firmware and refuses
+uncommitted firmware sources. Monitoring attaches without resetting the board.
 
 ## Relevant code
 

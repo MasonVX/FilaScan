@@ -1,0 +1,4 @@
+interface:
+  display_name: "FilaScan Device"
+  short_description: "Build, flash, and diagnose FilaScan hardware"
+  default_prompt: "Use $filascan-device to build and flash the connected FilaScan device."

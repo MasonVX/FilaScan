@@ -8,6 +8,8 @@ on:
       - core/**
       - shared/**
       - formats/**
+      - scripts/build-firmware.sh
+      - scripts/package-firmware.sh
       - .github/workflows/firmware.yml
   pull_request:
     branches: [main]
@@ -15,6 +17,8 @@ on:
       - core/**
       - shared/**
       - formats/**
+      - scripts/build-firmware.sh
+      - scripts/package-firmware.sh
       - .github/workflows/firmware.yml
   workflow_dispatch:
 
@@ -111,48 +115,15 @@ jobs:
           printf '%s\n' "$xtensa_bin" >> "$GITHUB_PATH"
           rustup run "$ESP_TOOLCHAIN_NAME" rustc --version
 
-      - name: Build release firmware
-        working-directory: core
-        run: cargo build --locked --release
+      - name: Build and package release firmware
+        run: ./scripts/build-firmware.sh dist
 
-      - name: Create merged flash image
-        working-directory: core
+      - name: Prepare OTA Pages artifact
         shell: bash
         run: |
-          mkdir -p ../dist
-          espflash save-image \
-            --chip esp32s3 \
-            --flash-size 16mb \
-            --flash-mode dio \
-            --flash-freq 80mhz \
-            --partition-table partitions.csv \
-            --merge \
-            target/xtensa-esp32s3-none-elf/release/FilaScan \
-            ../dist/FilaScan-esp32s3.bin
-
-          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-          ota_file="../dist/FilaScan-$version-ota.bin"
-          espflash save-image \
-            --chip esp32s3 \
-            --flash-size 16mb \
-            --flash-mode dio \
-            --flash-freq 80mhz \
-            --partition-table partitions.csv \
-            target/xtensa-esp32s3-none-elf/release/FilaScan \
-            "$ota_file"
-
-          (
-            cd ../dist
-            sha256sum FilaScan-esp32s3.bin "FilaScan-$version-ota.bin" > SHA256SUMS
-          )
-          ota_size="$(stat -c '%s' "$ota_file")"
-          ota_crc32="$(python3 -c 'import pathlib, sys, zlib; print(f"{zlib.crc32(pathlib.Path(sys.argv[1]).read_bytes()) & 0xffffffff:08x}")' "$ota_file")"
-          printf 'filename = "FilaScan-%s-ota.bin"\nversion = "%s"\nfilesize = %s\ncrc32 = "%s"\n' \
-            "$version" "$version" "$ota_size" "$ota_crc32" > ../dist/ota.toml
-          mkdir -p ../dist/ota-pages
-          cp "$ota_file" ../dist/ota.toml ../dist/ota-pages/
-          printf 'project=FilaScan\nfirmware_version=%s\ngit_commit=%s\ntarget=esp32s3\nflash_size=16mb\n' \
-            "$version" "$GITHUB_SHA" > ../dist/build-info.txt
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)"
+          mkdir -p dist/ota-pages
+          cp "dist/FilaScan-$version-ota.bin" dist/ota.toml dist/ota-pages/
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

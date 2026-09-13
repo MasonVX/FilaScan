@@ -373,13 +373,43 @@ The merged flash image is written to:
 build/FilaScan-esp32s3.bin
 ```
 
+The same build also creates the application-only OTA image, `ota.toml`,
+`SHA256SUMS` and `build-info.txt`. Local builds and GitHub Actions use the same
+packaging script.
+
 Flash the connected device:
 
 ```bash
-./scripts/flash-device.sh /dev/cu.usbmodem31101
+./scripts/flash-device.sh
 ```
 
-If no port is provided, the flash script uses `/dev/cu.usbmodem31101`.
+If no port is provided, the flash script automatically uses the only connected
+USB serial device. It stops and lists the choices when multiple devices are
+present. Flashing always rebuilds and refuses uncommitted firmware-source or
+build-script changes, so every installed binary corresponds to a commit.
+
+Attach the serial monitor without resetting the running device:
+
+```sh
+./scripts/monitor-device.sh [/dev/cu.usbmodem...]
+```
+
+## Codex development skills
+
+Repository-scoped Codex skills are stored in `.agents/skills`:
+
+- `filascan-device` covers firmware builds, committed-source flashing, safe
+  serial monitoring and device diagnosis.
+- `filascan-release` covers version metadata, release preflight, tag-triggered
+  publication and OTA verification.
+
+The skills provide project-specific decisions and safety rules. Deterministic
+operations remain in `scripts/`, so they can be used directly and by CI without
+Codex. Before a release, run:
+
+```sh
+./scripts/release-preflight.sh <version>
+```
 
 ## Continuous integration
 

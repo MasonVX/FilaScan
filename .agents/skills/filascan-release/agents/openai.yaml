@@ -1,0 +1,4 @@
+interface:
+  display_name: "FilaScan Release"
+  short_description: "Prepare and publish FilaScan firmware releases"
+  default_prompt: "Use $filascan-release to prepare and publish the next FilaScan firmware release."

@@ -4,9 +4,8 @@ shared/target/
 formats/target/
 .DS_Store
 
-# Generated firmware binaries (built by CI, not committed)
-build/*.bin
-build/bins/
+# Generated firmware artifacts (built by CI, not committed)
+build/
 dist/
 .wrangler/
 core/src/certs/web-server-certificate.pem

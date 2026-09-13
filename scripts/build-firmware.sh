@@ -2,6 +2,10 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+output_dir="${1:-$repo_dir/build}"
+if [[ "$output_dir" != /* ]]; then
+  output_dir="$repo_dir/$output_dir"
+fi
 
 for export_file in "$HOME/export-esp190.sh" "$HOME/export-esp1.sh" "$HOME/export-esp.sh"; do
   if [[ -f "$export_file" ]]; then
@@ -11,20 +15,13 @@ for export_file in "$HOME/export-esp190.sh" "$HOME/export-esp1.sh" "$HOME/export
   fi
 done
 
-rustup_bin="$(brew --prefix rustup)/bin"
-export PATH="$rustup_bin:$HOME/.cargo/bin:$PATH"
+if command -v brew >/dev/null 2>&1; then
+  rustup_bin="$(brew --prefix rustup)/bin"
+  export PATH="$rustup_bin:$HOME/.cargo/bin:$PATH"
+else
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
 cd "$repo_dir/core"
 cargo build --locked --release
 
-mkdir -p "$repo_dir/build"
-espflash save-image \
-  --chip esp32s3 \
-  --flash-size 16mb \
-  --flash-mode dio \
-  --flash-freq 80mhz \
-  --partition-table partitions.csv \
-  --merge \
-  target/xtensa-esp32s3-none-elf/release/FilaScan \
-  "$repo_dir/build/FilaScan-esp32s3.bin"
-
-echo "Built $repo_dir/build/FilaScan-esp32s3.bin"
+"$repo_dir/scripts/package-firmware.sh" "$output_dir"
