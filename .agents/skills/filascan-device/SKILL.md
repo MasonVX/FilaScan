@@ -5,7 +5,7 @@ description: Build, flash, monitor, or diagnose FilaScan firmware on WT32-SC01 P
 
 # FilaScan Device
 
-Work from the FilaScan repository root. Read `.github/copilot-instructions.md` before changing firmware or hardware behavior.
+Work from the FilaScan repository root. Follow the repository-wide constraints in `AGENTS.md`.
 
 ## Build
 
