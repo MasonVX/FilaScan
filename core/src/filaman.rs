@@ -19,7 +19,6 @@ use embassy_time::{Duration, Timer, with_timeout};
 use embedded_io_async::{Read, Write};
 use esp_mbedtls::{Certificates, TlsVersion, X509};
 use framework::{framework::Framework, utils::SpawnerHeapExt};
-use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -27,6 +26,10 @@ use crate::{
     diagnostics::LogBuffer,
     spool::{FilamentSpool, ProductReference, SpoolSource},
 };
+
+mod offline;
+
+use offline::{CachedSpool, OfflineState, PreparedQueue};
 
 // The SD card is mounted without long-file-name support. Keep every path
 // component within the FAT 8.3 limits, including the three-character suffix.
@@ -38,7 +41,6 @@ const HEARTBEAT_INITIAL_DELAY: Duration = Duration::from_secs(15);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(20);
 const INVENTORY_REFRESH_HEARTBEATS: u16 = 15;
-const OFFLINE_SCHEMA_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FilaManSettings {
@@ -110,45 +112,6 @@ struct ExistingSpool {
     location_id: Option<u64>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct CachedSpool {
-    external_id: String,
-    spool_id: u64,
-    location_id: Option<u64>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct InventorySnapshot {
-    schema: u8,
-    locations: Vec<FilaManLocation>,
-    spools: Vec<CachedSpool>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct PendingStorage {
-    sequence: u64,
-    spool: FilamentSpool,
-    location_id: u64,
-    location_name: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct OfflineQueue {
-    schema: u8,
-    next_sequence: u64,
-    operations: Vec<PendingStorage>,
-}
-
-impl Default for OfflineQueue {
-    fn default() -> Self {
-        Self {
-            schema: OFFLINE_SCHEMA_VERSION,
-            next_sequence: 1,
-            operations: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum StorageOutcome {
     Applied {
@@ -171,11 +134,7 @@ pub struct FilaManService {
     busy: Cell<bool>,
     heartbeat_succeeded: Cell<bool>,
     heartbeat_failure_active: Cell<bool>,
-    inventory: RefCell<Option<InventorySnapshot>>,
-    inventory_index: RefCell<HashMap<String, ExistingSpool>>,
-    inventory_serialized: RefCell<Vec<u8>>,
-    offline_queue: RefCell<OfflineQueue>,
-    queue_serialized: RefCell<Vec<u8>>,
+    offline: OfflineState,
     inventory_refresh_ticks: Cell<u16>,
     sdcard_available: bool,
 }
@@ -191,11 +150,7 @@ impl FilaManService {
             busy: Cell::new(false),
             heartbeat_succeeded: Cell::new(false),
             heartbeat_failure_active: Cell::new(false),
-            inventory: RefCell::new(None),
-            inventory_index: RefCell::new(HashMap::new()),
-            inventory_serialized: RefCell::new(Vec::new()),
-            offline_queue: RefCell::new(OfflineQueue::default()),
-            queue_serialized: RefCell::new(Vec::new()),
+            offline: OfflineState::new(),
             inventory_refresh_ticks: Cell::new(0),
             sdcard_available,
         })
@@ -208,7 +163,7 @@ impl FilaManService {
     pub fn status(&self) -> FilaManStatus {
         let settings = self.settings.borrow();
         let device_id = device_id_from_token(&settings.device_token);
-        let inventory = self.inventory.borrow();
+        let offline = self.offline.status();
         FilaManStatus {
             state: self.state.borrow().clone(),
             busy: self.busy.get(),
@@ -216,9 +171,9 @@ impl FilaManService {
             device_id,
             device_name: self.device_name.borrow().clone(),
             offline: self.import_enabled() && self.use_offline_inventory(),
-            cached_spools: inventory.as_ref().map(|snapshot| snapshot.spools.len()).unwrap_or(0),
-            cached_locations: inventory.as_ref().map(|snapshot| snapshot.locations.len()).unwrap_or(0),
-            pending_operations: self.offline_queue.borrow().operations.len(),
+            cached_spools: offline.cached_spools,
+            cached_locations: offline.cached_locations,
+            pending_operations: offline.pending_operations,
         }
     }
 
@@ -227,70 +182,8 @@ impl FilaManService {
         settings.enabled && !settings.device_token.is_empty()
     }
 
-    fn replace_inventory(&self, snapshot: InventorySnapshot, serialized: Vec<u8>) {
-        let mut index = HashMap::with_capacity(snapshot.spools.len());
-        for spool in &snapshot.spools {
-            index.insert(
-                spool.external_id.clone(),
-                ExistingSpool {
-                    id: spool.spool_id,
-                    location_id: spool.location_id,
-                },
-            );
-        }
-        *self.inventory_index.borrow_mut() = index;
-        *self.inventory.borrow_mut() = Some(snapshot);
-        *self.inventory_serialized.borrow_mut() = serialized;
-    }
-
     fn use_offline_inventory(&self) -> bool {
         self.local_ipv4_address().is_none() || !self.heartbeat_succeeded.get() || self.heartbeat_failure_active.get()
-    }
-
-    fn cached_registration(&self, spool: &FilamentSpool, offline: bool) -> SpoolRegistration {
-        let external_id = canonical_external_id(spool);
-        let locations = self
-            .inventory
-            .borrow()
-            .as_ref()
-            .map(|snapshot| snapshot.locations.clone())
-            .unwrap_or_default();
-
-        if let Some(operation) = self
-            .offline_queue
-            .borrow()
-            .operations
-            .iter()
-            .find(|operation| canonical_external_id(&operation.spool) == external_id)
-        {
-            return SpoolRegistration::Pending {
-                location_id: operation.location_id,
-                location_name: operation.location_name.clone(),
-                locations,
-            };
-        }
-
-        if let Some(existing) = self.inventory_index.borrow().get(&external_id).cloned() {
-            let location_name = existing.location_id.and_then(|location_id| {
-                locations
-                    .iter()
-                    .find(|location| location.id == location_id)
-                    .map(|location| location.name.clone())
-            });
-            return SpoolRegistration::Existing {
-                spool_id: existing.id,
-                location_id: existing.location_id,
-                location_name,
-                locations,
-                offline,
-            };
-        }
-
-        SpoolRegistration::New {
-            locations,
-            offline,
-            inventory_known: self.inventory.borrow().is_some(),
-        }
     }
 
     pub async fn load_from_sd(&self) {
@@ -313,28 +206,18 @@ impl FilaManService {
         }
 
         if let Ok(bytes) = file_store.lock().await.read_file_bytes(INVENTORY_PATH).await {
-            match serde_json::from_slice::<InventorySnapshot>(&bytes) {
-                Ok(snapshot) if snapshot.schema == OFFLINE_SCHEMA_VERSION => {
-                    self.replace_inventory(snapshot, bytes);
-                    let inventory = self.inventory.borrow();
-                    if let Some(inventory) = inventory.as_ref() {
-                        self.log_info(&format!(
-                            "FilaMan offline inventory loaded from SD card: {} spools, {} locations",
-                            inventory.spools.len(),
-                            inventory.locations.len()
-                        ));
-                    }
-                }
+            match self.offline.load_inventory(bytes) {
+                Ok(status) => self.log_info(&format!(
+                    "FilaMan offline inventory loaded from SD card: {} spools, {} locations",
+                    status.cached_spools, status.cached_locations
+                )),
                 _ => self.log_warn("Ignoring invalid cached FilaMan inventory"),
             }
         }
 
         if let Ok(bytes) = file_store.lock().await.read_file_bytes(QUEUE_PATH).await {
-            match serde_json::from_slice::<OfflineQueue>(&bytes) {
-                Ok(queue) if queue.schema == OFFLINE_SCHEMA_VERSION => {
-                    let count = queue.operations.len();
-                    *self.offline_queue.borrow_mut() = queue;
-                    *self.queue_serialized.borrow_mut() = bytes;
+            match self.offline.load_queue(bytes) {
+                Ok(count) => {
                     if count > 0 {
                         self.log_info(&format!("FilaMan offline queue loaded from SD card: {count} pending operations"));
                     }
@@ -418,31 +301,22 @@ impl FilaManService {
             return Err("Another FilaMan request is already running".to_string());
         }
         let result = async {
-            let mut locations = self.load_locations().await?;
-            let mut spools = self.load_inventory_spools().await?;
-            locations.sort_by_key(|location| location.id);
-            locations.dedup_by_key(|location| location.id);
-            spools.sort_by(|left, right| left.external_id.cmp(&right.external_id));
-            spools.dedup_by(|left, right| left.external_id == right.external_id);
-            let snapshot = InventorySnapshot {
-                schema: OFFLINE_SCHEMA_VERSION,
-                locations,
-                spools,
-            };
-            let serialized = serde_json::to_vec(&snapshot).map_err(|error| format!("inventory serialization failed: {error}"))?;
-            let changed = serialized.as_slice() != self.inventory_serialized.borrow().as_slice();
+            let locations = self.load_locations().await?;
+            let spools = self.load_inventory_spools().await?;
+            let prepared = self.offline.prepare_inventory(locations, spools)?;
+            let changed = prepared.changed;
             if changed && self.sdcard_available {
                 let file_store = self.framework.borrow().file_store();
                 file_store
                     .lock()
                     .await
-                    .create_write_file_bytes(INVENTORY_PATH, &serialized)
+                    .create_write_file_bytes(INVENTORY_PATH, &prepared.serialized)
                     .await
                     .map_err(|error| format!("SD write failed: {error:?}"))?;
             }
-            let spool_count = snapshot.spools.len();
-            let location_count = snapshot.locations.len();
-            self.replace_inventory(snapshot, serialized);
+            let spool_count = prepared.spool_count();
+            let location_count = prepared.location_count();
+            self.offline.commit_inventory(prepared);
             if changed {
                 self.log_info(&format!(
                     "FilaMan inventory refreshed: {spool_count} spools, {location_count} locations; snapshot {}",
@@ -461,7 +335,7 @@ impl FilaManService {
     }
 
     async fn synchronize_offline_queue(&self) -> bool {
-        let operations = self.offline_queue.borrow().operations.clone();
+        let operations = self.offline.operations();
         if operations.is_empty() || self.busy.replace(true) {
             return false;
         }
@@ -493,21 +367,28 @@ impl FilaManService {
                 }
             }
         }
-        self.busy.set(false);
-
         if completed == 0 {
+            self.busy.set(false);
             return false;
         }
-        let mut queue = self.offline_queue.borrow().clone();
-        queue.operations = remaining;
-        match self.persist_queue(queue).await {
+        let prepared = match self.offline.prepare_remaining(remaining) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.busy.set(false);
+                self.log_warn(&format!("Could not prepare synchronized FilaMan queue: {error}"));
+                return false;
+            }
+        };
+        let result = match self.persist_queue(prepared).await {
             Ok(true) => true,
             Ok(false) => false,
             Err(error) => {
                 self.log_warn(&format!("Could not persist synchronized FilaMan queue: {error}"));
                 false
             }
-        }
+        };
+        self.busy.set(false);
+        result
     }
 
     fn local_ipv4_address(&self) -> Option<String> {
@@ -718,14 +599,14 @@ impl FilaManService {
                 "FilaMan is offline; resolving external ID {} from the cached inventory",
                 spool.external_id
             ));
-            return Ok(self.cached_registration(spool, true));
+            return Ok(self.offline.resolve(spool, true));
         }
-        if self.inventory.borrow().is_some() {
+        if self.offline.has_inventory() {
             self.log_info(&format!(
                 "FilaMan: resolving external ID {} from the in-memory inventory",
                 spool.external_id
             ));
-            return Ok(self.cached_registration(spool, false));
+            return Ok(self.offline.resolve(spool, false));
         }
         if self.busy.replace(true) {
             return Err("Another FilaMan request is already running".to_string());
@@ -795,9 +676,7 @@ impl FilaManService {
             Some(spool_id) => self.move_spool_inner(spool_id, location_id).await.map(|response| response.spool_id),
             None => self.apply_storage_online(spool, location_id, location_name).await,
         };
-        self.busy.set(false);
-
-        match result {
+        let outcome = match result {
             Ok(spool_id) => Ok(StorageOutcome::Applied {
                 spool_id,
                 location_id,
@@ -813,7 +692,9 @@ impl FilaManService {
                 })
             }
             Err(error) => Err(error),
-        }
+        };
+        self.busy.set(false);
+        outcome
     }
 
     async fn apply_storage_online(&self, spool: &FilamentSpool, location_id: u64, _location_name: &str) -> Result<u64, String> {
@@ -835,27 +716,8 @@ impl FilaManService {
         if !self.sdcard_available {
             return Err("Offline storage requires an SD card".to_string());
         }
-        let external_id = canonical_external_id(spool);
-        let mut queue = self.offline_queue.borrow().clone();
-        if let Some(existing) = queue
-            .operations
-            .iter_mut()
-            .find(|operation| canonical_external_id(&operation.spool) == external_id)
-        {
-            existing.spool = spool.clone();
-            existing.location_id = location_id;
-            existing.location_name = location_name.to_string();
-        } else {
-            let sequence = queue.next_sequence;
-            queue.next_sequence = queue.next_sequence.saturating_add(1);
-            queue.operations.push(PendingStorage {
-                sequence,
-                spool: spool.clone(),
-                location_id,
-                location_name: location_name.to_string(),
-            });
-        }
-        let changed = self.persist_queue(queue).await?;
+        let prepared = self.offline.prepare_storage(spool, location_id, location_name)?;
+        let changed = self.persist_queue(prepared).await?;
         if changed {
             self.log_info(&format!(
                 "FilaMan operation queued offline for external ID {} at {}",
@@ -870,21 +732,19 @@ impl FilaManService {
         Ok(())
     }
 
-    async fn persist_queue(&self, queue: OfflineQueue) -> Result<bool, String> {
-        let serialized = serde_json::to_vec(&queue).map_err(|error| format!("queue serialization failed: {error}"))?;
-        if serialized.as_slice() == self.queue_serialized.borrow().as_slice() {
-            *self.offline_queue.borrow_mut() = queue;
+    async fn persist_queue(&self, prepared: PreparedQueue) -> Result<bool, String> {
+        if !prepared.changed {
+            self.offline.commit_queue(prepared);
             return Ok(false);
         }
         let file_store = self.framework.borrow().file_store();
         file_store
             .lock()
             .await
-            .create_write_file_bytes(QUEUE_PATH, &serialized)
+            .create_write_file_bytes(QUEUE_PATH, &prepared.serialized)
             .await
             .map_err(|error| format!("SD write failed: {error:?}"))?;
-        *self.offline_queue.borrow_mut() = queue;
-        *self.queue_serialized.borrow_mut() = serialized;
+        self.offline.commit_queue(prepared);
         Ok(true)
     }
 
@@ -1032,11 +892,7 @@ impl FilaManService {
                 .and_then(Value::as_array)
                 .ok_or_else(|| "FilaMan spool list response is invalid".to_string())?;
             for item in items {
-                let Some(external_id) = item
-                    .get("external_id")
-                    .and_then(Value::as_str)
-                    .and_then(canonicalize_remote_external_id)
-                else {
+                let Some(external_id) = item.get("external_id").and_then(Value::as_str).and_then(canonicalize_remote_external_id) else {
                     continue;
                 };
                 let Some(spool_id) = item.get("id").and_then(Value::as_u64).filter(|id| *id > 0) else {
