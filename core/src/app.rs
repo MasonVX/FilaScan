@@ -46,6 +46,7 @@ pub struct ReaderController {
     registered_spool_id: Option<u64>,
     current_location_id: Option<u64>,
     offline_pending: bool,
+    connectivity_timer: slint::Timer,
     _reader: Rc<RefCell<RfidReader>>,
 }
 
@@ -77,6 +78,7 @@ pub fn init_app(
         registered_spool_id: None,
         current_location_id: None,
         offline_pending: false,
+        connectivity_timer: slint::Timer::default(),
         _reader: reader.clone(),
     }));
     controller.borrow_mut().self_ref = Rc::downgrade(&controller);
@@ -86,6 +88,21 @@ pub fn init_app(
     initial_state.set_german(initial_language == Language::German);
     initial_state.set_status_text(localization::text(initial_language, "Starting RFID reader…", "RFID-Leser wird gestartet…").into());
     initial_state.set_current_version(env!("CARGO_PKG_VERSION").into());
+
+    {
+        let service = controller.borrow().filaman.clone();
+        let weak_ui = ui.clone();
+        initial_state.set_filaman_offline(service.is_offline());
+        controller.borrow().connectivity_timer.start(
+            slint::TimerMode::Repeated,
+            core::time::Duration::from_millis(500),
+            move || {
+                if let Some(window) = weak_ui.upgrade() {
+                    window.global::<ReaderState>().set_filaman_offline(service.is_offline());
+                }
+            },
+        );
+    }
 
     {
         let weak = Rc::downgrade(&controller);

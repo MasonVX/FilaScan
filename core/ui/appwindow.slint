@@ -2,6 +2,22 @@ import { ReaderState } from "app.slint";
 
 export { ReaderState }
 
+component OfflineBadge inherits Rectangle {
+    width: 62px;
+    height: 22px;
+    background: transparent;
+    border-width: 1px;
+    border-color: #f4c542;
+    border-radius: 4px;
+    Text {
+        text: "Offline";
+        color: #f4c542;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
 component IdleView inherits Rectangle {
     background: #10151d;
 
@@ -189,12 +205,17 @@ component SpoolView inherits Rectangle {
                 clicked => { ReaderState.manage-location(); }
             }
         }
-        Text {
-            horizontal-alignment: center;
-            color: ReaderState.reading ? #f4c542 : #72d6ff;
-            font-size: 14px;
-            overflow: elide;
-            text: ReaderState.reading ? (ReaderState.german ? "Tag wird gelesen…" : "Reading tag…") : ReaderState.status-text;
+        HorizontalLayout {
+            spacing: 8px;
+            if ReaderState.filaman-offline: OfflineBadge { }
+            Text {
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: ReaderState.reading ? #f4c542 : #72d6ff;
+                font-size: 14px;
+                overflow: elide;
+                text: ReaderState.reading ? (ReaderState.german ? "Tag wird gelesen…" : "Reading tag…") : ReaderState.status-text;
+            }
         }
     }
 }
@@ -500,5 +521,9 @@ export component AppWindow inherits Window {
         if ReaderState.choosing-location && !ReaderState.update-page-visible: LocationSelectionView { }
         if ReaderState.has-spool && !ReaderState.choosing-location && !ReaderState.update-page-visible: SpoolView { }
         if !ReaderState.has-spool && !ReaderState.choosing-location && !ReaderState.update-page-visible: IdleView { }
+        if ReaderState.filaman-offline && !ReaderState.has-spool && !ReaderState.choosing-location && !ReaderState.update-page-visible: OfflineBadge {
+            x: 10px;
+            y: parent.height - self.height - 10px;
+        }
     }
 }

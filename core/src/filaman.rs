@@ -171,7 +171,7 @@ impl FilaManService {
             registered: device_id.is_some(),
             device_id,
             device_name: self.device_name.borrow().clone(),
-            offline: self.import_enabled() && self.use_offline_inventory(),
+            offline: self.is_offline(),
             cached_spools: offline.cached_spools,
             cached_locations: offline.cached_locations,
             pending_operations: offline.pending_operations,
@@ -181,6 +181,10 @@ impl FilaManService {
     pub fn import_enabled(&self) -> bool {
         let settings = self.settings.borrow();
         settings.enabled && !settings.device_token.is_empty()
+    }
+
+    pub fn is_offline(&self) -> bool {
+        self.import_enabled() && self.use_offline_inventory()
     }
 
     fn use_offline_inventory(&self) -> bool {
