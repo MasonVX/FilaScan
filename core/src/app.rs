@@ -834,12 +834,16 @@ impl ReaderController {
         self.start_filaman_preparation(spool);
     }
 
-    fn show_status(&self, text: &str) {
+    fn render_status(&self, text: &str) {
         let ui = self.ui.unwrap();
         let state = ui.global::<ReaderState>();
         state.set_reading(false);
         state.set_has_spool(false);
         state.set_status_text(text.into());
+    }
+
+    fn show_status(&self, text: &str) {
+        self.render_status(text);
         self.framework.borrow().undim_display();
     }
 
@@ -1050,7 +1054,10 @@ impl FrameworkObserver for ReaderController {
         state.set_update_error(false);
         state.set_update_installing(true);
         self.log_info("Firmware update started");
-        self.show_status(self.t("Installing firmware update…", "Firmware-Update wird installiert…"));
+        // Framework OTA notifications are delivered while Framework is mutably borrowed.
+        // Updating Slint is safe here, but borrowing Framework again to wake the display
+        // would panic at runtime.
+        self.render_status(self.t("Installing firmware update…", "Firmware-Update wird installiert…"));
     }
 
     fn on_ota_status(&mut self, text: &str) {
@@ -1065,7 +1072,7 @@ impl FrameworkObserver for ReaderController {
         state.set_update_installing(false);
         state.set_update_error_text(text.into());
         self.log_error(&format!("Firmware update failed: {}", text.replace('\n', " ")));
-        self.show_status(self.t("Firmware update failed", "Firmware-Update fehlgeschlagen"));
+        self.render_status(self.t("Firmware update failed", "Firmware-Update fehlgeschlagen"));
     }
 
     fn on_ota_completed(&mut self, text: &str) {
@@ -1074,7 +1081,7 @@ impl FrameworkObserver for ReaderController {
         state.set_update_checking(false);
         state.set_update_error(false);
         self.log_info(&format!("Firmware update completed: {}", text.replace('\n', " ")));
-        self.show_status(self.t("Firmware updated. Restarting…", "Firmware aktualisiert. Neustart…"));
+        self.render_status(self.t("Firmware updated. Restarting…", "Firmware aktualisiert. Neustart…"));
     }
 
     fn on_web_config_started(&self, key: &str, _mode: WebConfigMode) {
