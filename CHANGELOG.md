@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4 - 2026-09-13
+
+- Separated the FilaMan offline inventory and queue state from network
+  orchestration.
+- Kept the FilaMan service busy until synchronized offline queue updates are
+  persisted, preventing concurrent requests from overwriting newer queue state.
+- Added repository-local Codex workflows for reproducible firmware builds,
+  reset-free serial diagnostics and release validation.
+- Unified local and GitHub Actions firmware packaging.
+
 ## 0.2.3 - 2026-09-13
 
 - Added an SD-backed offline FilaMan mode. FilaScan keeps the active spool and
