@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5 - 2026-09-13
+
+- Added an explicit, confirmed OTA installation action to the on-device
+  firmware page when a newer release is available.
+
 ## 0.2.4 - 2026-09-13
 
 - Separated the FilaMan offline inventory and queue state from network
